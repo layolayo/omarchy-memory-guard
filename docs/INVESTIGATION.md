@@ -14,6 +14,9 @@ When a process is paused (`SIGSTOP`) from **OMARAM Guard**, it is frozen on the 
    - **Never dump or read `/proc/<pid>/mem`:** Raw memory pages can contain decrypted credentials and private in-memory documents.
    - **Metadata only for open files:** Inspect `/proc/<pid>/fd/` symlinks solely to identify file paths, file extensions, and lock statuses. Never read the contents of personal user documents (`.txt`, `.pdf`, `.json`, etc.).
    - **Redact secrets in reports:** If command lines or logs contain accidental tokens or sensitive parameters, mask them immediately with `[REDACTED]`.
+5. **Ephemeral File Hygiene:**
+   - If generating intermediate diagnostic summaries or memory analysis dumps, write only to a fresh `mktemp -t omaram-XXXXXX` path rather than a predictable shared location.
+   - Clean up with a trap (`trap 'rm -f "$tmp"' EXIT`) and delete temporary artifacts before exiting—never leave memory snapshots or diagnostic dumps lying in `/tmp`.
 
 ---
 
@@ -21,7 +24,7 @@ When a process is paused (`SIGSTOP`) from **OMARAM Guard**, it is frozen on the 
 
 ### Step 1: Establish Facts
 Inspect the process boundaries under `/proc/<pid>/`:
-- **Command Line & Arguments:** `/proc/<pid>/cmdline` (delimited by NUL bytes) shows exact arguments, flags, input files, and scripts.
+- **Command Line & Arguments:** `/proc/<pid>/cmdline` (delimited by NUL bytes) shows exact arguments, flags, input files, and scripts (pre-sanitized by OMARAM Guard).
 - **Process Hierarchy:** `/proc/<pid>/status` `PPid` reveals the parent process (e.g. browser parent vs renderer child, terminal shell vs background job).
 - **Working Directory:** `readlink -f /proc/<pid>/cwd` shows what directory or project the process is operating on.
 
@@ -68,4 +71,24 @@ Produce a concise, well-structured diagnostic report:
    - **[2] 🔄 Clean Restart** — Terminate the frozen process and immediately re-launch a fresh instance using its original command line and working directory.
    - **[3] ▶️ Resume (`kill -CONT <pid>`)** — If the memory usage was legitimate/temporary, or if the user needs to resume briefly to save work before orderly exit.
    - **[4] 🎯 Targeted Reclaim** — If closing a specific child tab, document, or thread can free memory without bringing down the entire parent application.
+6. **Provenance Signing:**
+   End the report with a line naming the model and agent harness that produced it:
+   > Diagnosed by \<model name\> via \<agent harness\>.
 
+---
+
+## 4. Upstream Reporting Guardrails (If it is an Omarchy bug)
+
+Read this only after concluding that a memory leak or runaway loop sits genuinely within Omarchy's sphere of control (e.g., `omarchy-shell`, bar plugins, quickshell, themes, or core scripts):
+
+1. **Three conditions, all required:**
+   - **Verified bug in Omarchy's sphere:** A memory bloat in a standard third-party application (Chromium, Firefox, Electron app, or Python tool) is an upstream application issue, not Omarchy's bug.
+   - **Explicit user agreement:** Present the exact title and body you propose to file, and wait for confirmation. Never file unprompted.
+   - **Authenticated GitHub CLI:** `gh auth status` must succeed. If unauthenticated, hand the formatted text to the user to submit manually.
+2. **Search before filing:**
+   ```bash
+   gh search issues --repo omacom/omarchy "<component> memory leak"
+   ```
+   Check open and closed issues for regressions before creating duplicates.
+3. **Sign the report:**
+   Include system diagnostics from `omarchy version` and sign machine-authored reports.

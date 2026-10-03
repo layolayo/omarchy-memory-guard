@@ -77,6 +77,8 @@ while true; do
     fi
 
     NAME=$(cat "/proc/$PID/comm" 2>/dev/null || echo "process")
+    NAME=${NAME##*/}
+    [[ -n $NAME && $NAME != "-" && $NAME != "." && $NAME != ".." ]] || NAME="process"
     NAME=$(printf '%s' "$NAME" | tr -cd '[:print:]')
     [ -z "$NAME" ] && NAME="process"
 

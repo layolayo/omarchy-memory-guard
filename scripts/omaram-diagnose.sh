@@ -29,7 +29,14 @@ kill -STOP "$pid" 2>/dev/null || true
 
 # 2. Gather process facts
 comm=$(cat "/proc/$pid/comm" 2>/dev/null || echo "unknown")
+# Strip directory components if prctl set a custom path-like name, matching omarchy-crash-watch
+comm=${comm##*/}
+[[ -n $comm && $comm != "-" && $comm != "." && $comm != ".." ]] || comm="unknown"
+comm=$(printf '%s' "$comm" | tr -cd '[:print:]')
+
 exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "unknown")
+exe=$(printf '%s' "$exe" | tr -cd '[:print:]')
+
 cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "$comm")
 
 # Sanitize and redact inline credentials (passwords, tokens, API keys, basic auth URLs)
@@ -47,14 +54,14 @@ clean_cmdline=$(printf '%s' "$cmdline" | sed -E \
 
 # Sanitize strings to strip binary control characters
 clean_cmdline=$(printf '%s' "$clean_cmdline" | tr -cd '[:print:]\t\n')
-comm=$(printf '%s' "$comm" | tr -cd '[:print:]')
-exe=$(printf '%s' "$exe" | tr -cd '[:print:]')
 
 cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || echo "unknown")
 cwd=$(printf '%s' "$cwd" | tr -cd '[:print:]')
 
 ppid=$(awk '/PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "1")
 parent_comm=$(cat "/proc/$ppid/comm" 2>/dev/null || echo "unknown")
+parent_comm=${parent_comm##*/}
+[[ -n $parent_comm && $parent_comm != "-" && $parent_comm != "." && $parent_comm != ".." ]] || parent_comm="unknown"
 parent_comm=$(printf '%s' "$parent_comm" | tr -cd '[:print:]')
 
 rss_kb=$(awk '/VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "0")
@@ -98,6 +105,8 @@ Privacy Invariants:
 - NEVER read /proc/$pid/environ (contains sensitive environment tokens and secrets).
 - NEVER dump /proc/$pid/mem (contains raw memory bytes).
 - Inspect /proc/$pid/fd/ only to identify file paths and locks; NEVER read the file contents of private user documents.
+- Ephemeral file hygiene: If writing temporary diagnostic files or memory analysis dumps, write only to a fresh \`mktemp -t omaram-XXXXXX\` path and delete it with \`trap 'rm -f ...' EXIT\` before exiting. Never leave memory dump files in /tmp.
+- Provenance signing: End your report with: \`> Diagnosed by <model name> via <agent harness>.\`
 
 Investigation instructions:
 Follow the Omarchy memory investigation guide:
@@ -116,7 +125,7 @@ Key objectives:
      [2] 🔄 Clean Restart: Kill \$pid and re-launch the application fresh with its original command line and working directory.
      [3] ▶️ Resume: Run \`kill -CONT $pid\` if memory consumption was legitimate or user needs to save open work.
      [4] 🎯 Targeted Reclaim: If this is a child renderer tab, worker, or sub-process, pinpoint the specific tab or task to close to preserve the main application.
-   - Diagnostic discipline: Diagnosis reads; always present the findings first and wait for the user to confirm before running a destructive signal or restart.
+   - Diagnostic discipline: Diagnosis reads; it does not destroy, unpause, or mutate without explicit confirmation. Present findings first and wait for the user to confirm before running a destructive signal or restart. Leave the system as you found it.
 PROMPT
 )
 

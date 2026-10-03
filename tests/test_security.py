@@ -149,6 +149,17 @@ class DiagnoseSecurityTests(unittest.TestCase):
         self.assertIn("NEVER read /proc/$pid/environ", content)
         self.assertIn("NEVER dump /proc/$pid/mem", content)
         self.assertIn("Inspect /proc/$pid/fd/ only to identify file paths and locks", content)
+        # Ephemeral file hygiene & provenance signing matching Omarchy crash handler
+        self.assertIn("Ephemeral file hygiene", content)
+        self.assertIn("mktemp -t omaram-XXXXXX", content)
+        self.assertIn("Provenance signing", content)
+        self.assertIn("Diagnosed by <model name> via <agent harness>", content)
+
+    def test_prctl_basename_sanitization(self):
+        # Like omarchy-crash-watch, must strip slashes from comm in case prctl set path-like name
+        content = self.script.read_text()
+        self.assertIn("${comm##*/}", content)
+        self.assertIn("${parent_comm##*/}", content)
 
 
 class GuardSecurityTests(unittest.TestCase):
@@ -173,6 +184,25 @@ class GuardSecurityTests(unittest.TestCase):
         self.assertIn('if [[ ! -d "$CWD" ]]', self.content)
         # Must verify exe fallback
         self.assertIn('readlink -f "/proc/$PID/exe"', self.content)
+
+    def test_prctl_basename_sanitization(self):
+        # Must strip path components from process name
+        self.assertIn("${NAME##*/}", self.content)
+
+
+class InvestigationDocSecurityTests(unittest.TestCase):
+    def setUp(self):
+        self.doc_path = ROOT_DIR / "docs" / "INVESTIGATION.md"
+        self.assertTrue(self.doc_path.exists())
+        self.content = self.doc_path.read_text()
+
+    def test_upstream_reporting_guardrails(self):
+        # Must require verified bug in Omarchy's sphere, user consent, and gh auth status
+        self.assertIn("Upstream Reporting Guardrails", self.content)
+        self.assertIn("Verified bug in Omarchy's sphere", self.content)
+        self.assertIn("Explicit user agreement", self.content)
+        self.assertIn("gh auth status", self.content)
+        self.assertIn("Provenance Signing", self.content)
 
 
 class QMLIntegrityTests(unittest.TestCase):
