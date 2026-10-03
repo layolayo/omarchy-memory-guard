@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "matthew.memory-guard",
+  "id": "io.github.layolayo.memory-guard",
   "name": "Memory Guard",
   "version": "1.0.0",
   "author": "Matthew",

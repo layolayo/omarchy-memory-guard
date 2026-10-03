@@ -6,7 +6,7 @@ import qs.Ui
 
 BarWidget {
   id: root
-  moduleName: "matthew.memory-guard"
+  moduleName: "io.github.layolayo.memory-guard"
 
   property int memPct: 0
 
@@ -17,7 +17,7 @@ BarWidget {
   function manageMem() {
     if (root.bar) {
       root.bar.run("hyprctl eval 'o.window({ title = \"^(OMARAM-GUARD)$\" }, { float = true, center = true, size = { 465, 425 } })'")
-      root.bar.run("uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c 'source omarchy-restart-gum; $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/omaram-guard.sh'")
+      root.bar.run("uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c 'source omarchy-restart-gum; $HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/scripts/omaram-guard.sh'")
     }
   }
 
@@ -26,7 +26,7 @@ BarWidget {
 
   Process {
     id: memProc
-    command: ["/bin/bash", "-c", "$HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/check-mem-pct.sh"]
+    command: ["/bin/bash", "-c", "$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/scripts/check-mem-pct.sh"]
     onExited: function(exitCode) {
       root.memPct = exitCode
     }
