@@ -15,7 +15,7 @@ BarWidget {
   }
 
   function manageMem() {
-    if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/manage-memory.sh")
+    if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/omaram-guard.sh")
   }
 
   implicitWidth: button.implicitWidth

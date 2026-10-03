@@ -12,7 +12,7 @@
     "barWidget": "MemoryGuard.qml"
   },
   "barWidget": {
-    "displayName": "Memory Guard",
+    "displayName": "OMARAM Guard",
     "description": "Indicates high memory usage",
     "category": "System",
     "allowMultiple": false
