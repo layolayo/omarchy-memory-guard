@@ -1,4 +1,4 @@
-# Omarchy Memory Guard
+# OMARAM Guard
 
 ![OMARAM Guard Preview](assets/preview.png)
 

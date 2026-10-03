@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "io.github.layolayo.memory-guard",
-  "name": "Memory Guard",
+  "name": "OMARAM Guard",
   "version": "1.0.0",
-  "author": "Matthew",
-  "description": "Monitors memory usage and alerts when high",
+  "author": "layolayo",
+  "description": "The High Memory Guard "description": "Monitors memory usage and alerts when high" Diagnostic Tool.",
   "kinds": [
     "bar-widget"
   ],
