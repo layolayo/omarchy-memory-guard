@@ -15,6 +15,8 @@ ASCII
 
 while true; do
     clear
+    # Set standard X11 window title so we can target it with Hyprland window rules
+    printf "\033]0;OMARAM-GUARD\007"
 
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
     # Logo is 56 chars. Subtitle is 39 chars. Margin of 10 perfectly centers it under the logo (2 + 8).
@@ -24,13 +26,15 @@ while true; do
     # Using awk to cleanly strip 'Mem:' and perfectly align the columns
     MEM_STATS=$(free -h | head -n 2 | awk 'NR==1 {print "Total\tUsed\tFree\tShared\tCache\tAvail"} NR==2 {print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7}' | sed 's/Gi/G/g; s/Mi/M/g' | column -t -s $'\t' -R 1,2,3,4,5,6)
     MEM_STATS=$(echo "$MEM_STATS" | sed $'s/.*/\033[38;5;135m&\033[0m/')
-    MEM_BOX=$(gum style --border rounded --border-foreground 135 --padding "0 2" "$MEM_STATS")
+    MEM_BOX=$(gum style --border rounded --padding "0 2" "$MEM_STATS")
+    MEM_BOX=$(echo "$MEM_BOX" | sed $'s/.*/\033[38;5;135m&\033[0m/')
     gum style --margin "0 7" "$MEM_BOX"
     
     # Process List
     LIST=$(ps -U "$USER" -o pid,rss,pmem,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{printf "%8s %7s MB %6s%%    %s\n", $1, int($2/1024), $3, $4}')
 
     BBLANK=$(printf '\xE2\xA0\x80')
+    LIST=$(echo "$LIST" | sed "s/^/$BBLANK/g")
     COLUMNS=$(printf "%s  %8s %10s %7s    %s" "$BBLANK" "PID" "RAM" "MEM %" "APP")
     HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[2mSelect an app to manage (ESC to quit)\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
     
@@ -39,6 +43,9 @@ while true; do
     if [ -z "$TARGET" ]; then
         exit 130
     fi
+
+    # Strip the Braille Blank hack before extracting values
+    TARGET=$(echo "$TARGET" | sed "s/$BBLANK//g")
 
     PID=$(echo "$TARGET" | awk '{print $1}')
     NAME=$(echo "$TARGET" | awk '{print $5}')
