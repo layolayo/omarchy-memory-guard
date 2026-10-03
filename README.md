@@ -1,5 +1,7 @@
 # Omarchy Memory Guard
 
+![OMARAM Guard Preview](assets/preview.png)
+
 A native Omarchy shell widget that monitors system memory and provides an interactive terminal UI for pausing or killing memory-heavy processes.
 
 ## Features
