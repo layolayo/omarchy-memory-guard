@@ -37,19 +37,17 @@ while true; do
     BBLANK=$(printf '\xE2\xA0\x80')
     LIST=$(echo "$LIST" | sed "s/^/$BBLANK/g")
     COLUMNS=$(printf "%s  %8s %10s %7s    %s" "$BBLANK" "PID" "RAM" "MEM %" "APP")
-    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[2mSelect an app to manage · Super + T to tile (ESC to quit)\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
 
-    # Render bottom instruction area
+    # Render bottom instruction area with navigation and tiling commands
     LINES=$(tput lines 2>/dev/null || echo 24)
     FOOTER_ROW=$((LINES - 1))
-    if [ "$FOOTER_ROW" -ge 20 ]; then
-        tput sc 2>/dev/null || true
-        tput cup "$FOOTER_ROW" 4 2>/dev/null || true
-        printf "\033[2mTip: Press \033[1;36mSuper + T\033[0;2m to toggle tiling\033[0m"
-        tput rc 2>/dev/null || true
-    fi
+    tput sc 2>/dev/null || true
+    tput cup "$FOOTER_ROW" 2 2>/dev/null || true
+    printf "\033[2mSuper + T: Tile  •  ESC: Quit\033[0m"
+    tput rc 2>/dev/null || true
 
-    TARGET=$(echo "$LIST" | gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=8)
+    TARGET=$(echo "$LIST" | gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=7)
 
     if [ -z "$TARGET" ]; then
         exit 130
@@ -71,21 +69,19 @@ while true; do
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
     if [ "$PROC_STATE" = "T" ]; then
-        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:\n\033[2mSuper + T to tile · ESC to return\033[0m")
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
         TOGGLE_ACTION="▶️ Resume (SIGCONT)"
         AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
     else
-        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:\n\033[2mSuper + T to tile · ESC to return\033[0m")
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
         TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
 
-    if [ "$FOOTER_ROW" -ge 20 ]; then
-        tput sc 2>/dev/null || true
-        tput cup "$FOOTER_ROW" 4 2>/dev/null || true
-        printf "\033[2mTip: Press \033[1;36mSuper + T\033[0;2m to toggle tiling\033[0m"
-        tput rc 2>/dev/null || true
-    fi
+    tput sc 2>/dev/null || true
+    tput cup "$FOOTER_ROW" 2 2>/dev/null || true
+    printf "\033[2mSuper + T: Tile  •  ESC: Back\033[0m"
+    tput rc 2>/dev/null || true
 
     ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
         "💀 Kill Process" \
