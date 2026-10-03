@@ -58,21 +58,20 @@ while true; do
 
     if [ "$PROC_STATE" = "T" ]; then
         ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
-        ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
-            "▶️ Resume (SIGCONT)" \
-            "🔄 Restart Process" \
-            "🤖 Diagnose with AI (Inspect Paused)" \
-            "💀 Kill Process" \
-            "🔙 Back to List")
+        TOGGLE_ACTION="▶️ Resume (SIGCONT)"
+        AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
     else
         ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
-        ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
-            "💀 Kill Process" \
-            "🔄 Restart Process" \
-            "⏸️ Pause (SIGSTOP)" \
-            "🤖 Diagnose with AI (SIGSTOP)" \
-            "🔙 Back to List")
+        TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
+        AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
+
+    ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
+        "💀 Kill Process" \
+        "🔄 Restart Process" \
+        "$TOGGLE_ACTION" \
+        "$AI_ACTION" \
+        "🔙 Back to List")
 
     case "$ACTION" in
         *"Kill"*)
