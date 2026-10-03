@@ -23,3 +23,12 @@ Move the widget into your bar:
 ```bash
 omarchy bar put io.github.layolayo.memory-guard --section center
 ```
+
+## Dependencies
+- `gum`: Required for the interactive terminal UI. (Usually included with Omarchy desktop installations).
+
+## Removal
+To completely remove the plugin from your system:
+```bash
+omarchy plugin remove io.github.layolayo.memory-guard --yes
+```
