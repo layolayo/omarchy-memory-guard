@@ -76,6 +76,7 @@ omaram_choose() {
     local _header="$2"
     local _footer_fmt="$3"
     local _out_var="$4"
+    local _color="${5:-196}"
     local _selected=0
     local _num=${#_items[@]}
     [ "$_num" -eq 0 ] && return 1
@@ -89,7 +90,7 @@ omaram_choose() {
         local i _lbl _footer
         for ((i=0; i<_num; i++)); do
             if [ "$i" -eq "$_selected" ]; then
-                printf "\r\033[K \033[38;5;196mᐅ %s\033[0m\n" "${_items[$i]}"
+                printf "\r\033[K \033[38;5;%smᐅ %s\033[0m\n" "$_color" "${_items[$i]}"
             else
                 printf "\r\033[K   %s\n" "${_items[$i]}"
             fi
@@ -97,7 +98,7 @@ omaram_choose() {
         printf "\r\033[K\n"
         _lbl=$(get_tile_action_label)
         printf -v _footer "$_footer_fmt" "$_lbl"
-        printf "\r\033[K %s\n" "$_footer"
+        printf "\r\033[K %s" "$_footer"
     }
 
     _draw
@@ -111,7 +112,7 @@ omaram_choose() {
         if [ "$status" -gt 128 ]; then
             if [ -f "$FLOAT_CHANGED_FLAG" ]; then
                 rm -f "$FLOAT_CHANGED_FLAG"
-                printf "\033[%dA" "$((_num + 2))"
+                printf "\033[%dA" "$((_num + 1))"
                 _draw
             fi
             continue
@@ -126,11 +127,11 @@ omaram_choose() {
             IFS= read -rsn2 -t 0.05 rest || true
             if [[ "$rest" == "[A" || "$rest" == "OA" ]]; then
                 _selected=$(( (_selected - 1 + _num) % _num ))
-                printf "\033[%dA" "$((_num + 2))"
+                printf "\033[%dA" "$((_num + 1))"
                 _draw
             elif [[ "$rest" == "[B" || "$rest" == "OB" ]]; then
                 _selected=$(( (_selected + 1) % _num ))
-                printf "\033[%dA" "$((_num + 2))"
+                printf "\033[%dA" "$((_num + 1))"
                 _draw
             elif [ -z "$rest" ]; then
                 printf "\033[?25h"
@@ -138,11 +139,11 @@ omaram_choose() {
             fi
         elif [[ "$key" == "k" ]]; then
             _selected=$(( (_selected - 1 + _num) % _num ))
-            printf "\033[%dA" "$((_num + 2))"
+            printf "\033[%dA" "$((_num + 1))"
             _draw
         elif [[ "$key" == "j" ]]; then
             _selected=$(( (_selected + 1) % _num ))
-            printf "\033[%dA" "$((_num + 2))"
+            printf "\033[%dA" "$((_num + 1))"
             _draw
         elif [[ "$key" == $'\x03' ]]; then
             printf "\033[?25h"
@@ -198,7 +199,7 @@ while true; do
     NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
 
     TARGET=""
-    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET; then
+    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208"; then
         exit 130
     fi
 
@@ -244,11 +245,11 @@ while true; do
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
     if [ "$PROC_STATE" = "T" ]; then
-        ACTION_HEADER=$(printf "\n\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
         TOGGLE_ACTION="▶️ Resume (SIGCONT)"
         AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
     else
-        ACTION_HEADER=$(printf "\n\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
         TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
@@ -263,7 +264,7 @@ while true; do
     ACTION_NAV="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m"
 
     ACTION=""
-    if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION; then
+    if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION "196"; then
         continue
     fi
 
