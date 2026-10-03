@@ -207,6 +207,11 @@ class GuardSecurityTests(unittest.TestCase):
         self.assertIn("get_tile_action_label", self.content)
         self.assertIn("super+t %s • esc quit", self.content)
         self.assertIn("super+t %s • esc back", self.content)
+        # Left and right icons must be removed since navigation is strictly vertical
+        self.assertIn("↑↓ navigate", self.content)
+        self.assertNotIn("←↓↑→", self.content)
+        # Help text must not be bundled into choices as selectable items
+        self.assertNotIn("FULL_LIST", self.content)
 
         # Test the function logic with mocked floating states
         test_script_tiled = """
