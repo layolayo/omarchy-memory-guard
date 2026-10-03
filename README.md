@@ -15,7 +15,7 @@ A native Omarchy shell widget that monitors system memory, dispatches proactive 
   - `Restart Process`: Captures the process's working directory and command-line arguments, kills the bloated instance, and re-launches it fresh in the background to flush RAM instantly.
   - `Pause (SIGSTOP)`: (Shown when running) Freezes execution to halt runaway memory growth without losing unsaved application state.
   - `Resume (SIGCONT)`: (Shown when paused) Resumes a suspended process once system pressure subsides.
-  - `Diagnose with AI (SIGSTOP)`: Freezes the process and launches Omarchy's default AI agent (`omarchy-agent`) in a floating window to inspect memory allocations, open files, and journal logs to recommend `SIGCONT` vs `SIGKILL`.
+  - `Diagnose with AI (SIGSTOP)`: Freezes the process and launches Omarchy's default AI agent (`omarchy-agent`). Automatically snaps OMARAM Guard into tiled mode if currently floating, positioning the process monitor and the diagnostic agent terminal side-by-side without visual overlap.
   - `Kill (SIGKILL)`: Immediately terminates unresponsive processes.
 - **Zero Config Pollution:** Transient Hyprland floating rules applied ephemerally on launch without modifying your persistent configuration files.
 

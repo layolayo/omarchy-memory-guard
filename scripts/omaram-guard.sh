@@ -15,6 +15,35 @@ ASCII
 # Set standard X11 window title
 printf "\033]0;OMARAM-GUARD\007"
 
+# Auto-tile OMARAM window if it is currently floating so AI diagnosis fits side-by-side
+tile_if_floating() {
+    if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+        local active_json addr is_floating is_omaram omaram_client
+        active_json=$(hyprctl activewindow -j 2>/dev/null || true)
+        is_omaram=$(echo "$active_json" | jq -r '(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") // false' 2>/dev/null || echo "false")
+
+        if [[ "$is_omaram" == "true" ]]; then
+            is_floating=$(echo "$active_json" | jq -r '.floating // false' 2>/dev/null || echo "false")
+            addr=$(echo "$active_json" | jq -r '.address // ""' 2>/dev/null || echo "")
+        else
+            omaram_client=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") | "\(.address) \(.floating)"' 2>/dev/null | head -1)
+            addr=$(echo "$omaram_client" | awk '{print $1}')
+            is_floating=$(echo "$omaram_client" | awk '{print $2}')
+        fi
+
+        if [[ "$is_floating" == "true" ]]; then
+            if [[ -n "$addr" ]]; then
+                hyprctl dispatch "hl.dsp.window.float({ window = \"address:$addr\", action = \"off\" })" >/dev/null 2>&1 || \
+                hyprctl dispatch togglefloating "address:$addr" >/dev/null 2>&1 || \
+                hyprctl dispatch togglefloating >/dev/null 2>&1 || true
+            else
+                hyprctl dispatch "hl.dsp.window.float({ action = \"off\" })" >/dev/null 2>&1 || \
+                hyprctl dispatch togglefloating >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+}
+
 while true; do
     clear
 
@@ -144,6 +173,7 @@ while true; do
             sleep 1.5
             ;;
         *"Diagnose"*)
+            tile_if_floating
             SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
             "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" >/dev/null 2>&1 &
             gum style --foreground 51 --margin "1 2" "⏸️ Paused $NAME & launched AI diagnostic agent."

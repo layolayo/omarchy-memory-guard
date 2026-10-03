@@ -189,6 +189,13 @@ class GuardSecurityTests(unittest.TestCase):
         # Must strip path components from process name
         self.assertIn("${NAME##*/}", self.content)
 
+    def test_auto_tiles_on_diagnose(self):
+        # Must check if window is floating and auto-tile before launching AI agent
+        self.assertIn("tile_if_floating", self.content)
+        self.assertIn("is_floating", self.content)
+        self.assertIn("hl.dsp.window.float", self.content)
+        self.assertIn("action = \\\"off\\\"", self.content)
+
 
 class InvestigationDocSecurityTests(unittest.TestCase):
     def setUp(self):
