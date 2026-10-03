@@ -22,7 +22,7 @@ while true; do
     gum style --foreground 51 --align center --margin "1 0 0 0" "$LOGO"
     gum style --foreground 245 --align center "The High Memory Guard & Diagnostic Tool"
 
-    MEM_STATS=$(free -h | head -n 2)
+    MEM_STATS=$(free -h | head -n 2 | sed 's/Mem:/    /')
     MEM_BOX=$(gum style --border rounded --border-foreground 99 --padding "0 2" "$MEM_STATS")
     gum style --align center --margin "1 0" "$MEM_BOX"
     
