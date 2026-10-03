@@ -32,6 +32,9 @@ exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "unknown")
 cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "$comm")
 cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || echo "unknown")
 
+ppid=$(awk '/PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "1")
+parent_comm=$(cat "/proc/$ppid/comm" 2>/dev/null || echo "unknown")
+
 rss_kb=$(awk '/VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "0")
 rss_mb=$((rss_kb / 1024))
 swap_kb=$(awk '/VmSwap:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "0")
@@ -44,33 +47,41 @@ pss_mb=$((pss_kb / 1024))
 total_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "1")
 pmem=$((rss_kb * 100 / total_kb))
 
+docs="$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/docs/INVESTIGATION.md"
+
 # 3. Construct structured prompt for the Omarchy coding agent
 prompt=$(cat <<PROMPT
-A process has been paused with SIGSTOP via OMARAM Guard because it is consuming excessive memory ($rss_mb MB, ~$pmem% of total system RAM).
+A process has been paused with SIGSTOP via OMARAM Guard because it is consuming excessive RAM ($rss_mb MB, ~$pmem% of total system memory).
 
-Investigate why this process is consuming so much memory, check for memory leaks, runaway loops, or uncollected buffers, and advise on whether to resume (SIGCONT) or terminate (SIGKILL).
+The process is currently frozen in RAM as a precursor to an Out-Of-Memory (OOM) kill or system freeze. Your goal is to investigate why this process is consuming so much memory, check for memory leaks or runaway loops, assess data loss risk, and provide an evidence-based recommendation on whether to resume (SIGCONT) or terminate (SIGKILL).
 
 Target Process:
   PID:         $pid
   Process:     $comm
+  Parent:      $parent_comm (PID $ppid)
   Binary:      $exe
   Command:     $cmdline
   Working Dir: $cwd
-  Memory RSS:  $rss_mb MB (~$pmem% RAM)
+  Memory RSS:  $rss_mb MB (~$pmem% of system RAM)
   Memory PSS:  $pss_mb MB
   Swap Used:   $swap_mb MB
   Threads:     $threads
   State:       PAUSED (SIGSTOP)
 
 Investigation instructions:
-1. Examine /proc/$pid/status and /proc/$pid/smaps_rollup to analyze memory allocations (anonymous vs file-backed memory, dirty pages).
-2. Check open file descriptors in /proc/$pid/fd/ and network sockets if relevant.
-3. Review recent systemd journal logs: journalctl _PID=$pid --since "15 minutes ago" --no-pager.
-4. If this is a script, runtime, or browser process, identify which file, tab, or task is causing the bloat.
-5. Provide a clear summary:
-   - What the process is currently doing
-   - Why memory is elevated
-   - Safe next action: Resume (kill -CONT $pid) or Terminate (kill -9 $pid)
+Follow the Omarchy memory investigation guide:
+  $docs
+
+Key objectives:
+1. Establish evidence: Read /proc/$pid/status and /proc/$pid/smaps_rollup to analyze whether this is private dirty heap (leak/active data) vs shared/file-backed cache.
+2. In-flight work & data safety: Inspect open file descriptors in /proc/$pid/fd/ to determine if unsaved files, database writes, or active sockets would be damaged by termination.
+3. Check journalctl _PID=$pid --since "15 minutes ago" --no-pager for error bursts or GC failure cycles.
+4. Report:
+   - What the process was actively working on
+   - The verified mechanism causing the memory bloat (distinguishing proven facts from inferences)
+   - Whether any unsaved user data is at risk
+   - Clear recommendation: Safe to Resume (kill -CONT $pid), Targeted Tab/File Closure, or Terminate (kill -9 $pid)
+   - Diagnostic discipline: Diagnosis reads; do not kill or resume the process without user confirmation.
 PROMPT
 )
 

@@ -1,6 +1,9 @@
 # OMARAM Guard
 
-![OMARAM Guard Preview](assets/preview.png)
+<p align="center">
+  <img src="assets/preview.png" width="49%" alt="OMARAM Guard Monitor" />
+  <img src="assets/menu.png" width="49%" alt="OMARAM Guard Process Actions" />
+</p>
 
 A native Omarchy shell widget that monitors system memory, dispatches proactive desktop alerts, and provides an interactive terminal UI for pausing, inspecting, diagnosing with AI, or killing memory-heavy processes.
 
