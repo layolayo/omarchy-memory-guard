@@ -67,6 +67,94 @@ watch_floating_state() {
     done
 }
 
+ESC=$'\e'
+
+# Interactive in-place selector that cleanly places instructions at the bottom
+# and restricts navigation strictly to the items (never allowing blank line or instructions to be selected)
+omaram_choose() {
+    local -n _items=$1
+    local _header="$2"
+    local _footer_fmt="$3"
+    local _out_var="$4"
+    local _selected=0
+    local _num=${#_items[@]}
+    [ "$_num" -eq 0 ] && return 1
+
+    printf "\033[?25l"
+    trap 'printf "\033[?25h"' RETURN INT TERM
+
+    [ -n "$_header" ] && printf "%s\n" "$_header"
+
+    _draw() {
+        local i _lbl _footer
+        for ((i=0; i<_num; i++)); do
+            if [ "$i" -eq "$_selected" ]; then
+                printf "\r\033[K \033[38;5;196mᐅ %s\033[0m\n" "${_items[$i]}"
+            else
+                printf "\r\033[K   %s\n" "${_items[$i]}"
+            fi
+        done
+        printf "\r\033[K\n"
+        _lbl=$(get_tile_action_label)
+        printf -v _footer "$_footer_fmt" "$_lbl"
+        printf "\r\033[K %s\n" "$_footer"
+    }
+
+    _draw
+
+    while true; do
+        local key=""
+        IFS= read -rsn1 -t 0.15 key
+        local status=$?
+
+        # Timeout (>128): check if Hyprland float state changed in background
+        if [ "$status" -gt 128 ]; then
+            if [ -f "$FLOAT_CHANGED_FLAG" ]; then
+                rm -f "$FLOAT_CHANGED_FLAG"
+                printf "\033[%dA" "$((_num + 2))"
+                _draw
+            fi
+            continue
+        elif [ "$status" -ne 0 ]; then
+            # EOF or read error (e.g. terminal disconnected or piped input closed)
+            printf "\033[?25h"
+            return 130
+        fi
+
+        if [[ "$key" == "$ESC" ]]; then
+            local rest=""
+            IFS= read -rsn2 -t 0.05 rest || true
+            if [[ "$rest" == "[A" || "$rest" == "OA" ]]; then
+                _selected=$(( (_selected - 1 + _num) % _num ))
+                printf "\033[%dA" "$((_num + 2))"
+                _draw
+            elif [[ "$rest" == "[B" || "$rest" == "OB" ]]; then
+                _selected=$(( (_selected + 1) % _num ))
+                printf "\033[%dA" "$((_num + 2))"
+                _draw
+            elif [ -z "$rest" ]; then
+                printf "\033[?25h"
+                return 130
+            fi
+        elif [[ "$key" == "k" ]]; then
+            _selected=$(( (_selected - 1 + _num) % _num ))
+            printf "\033[%dA" "$((_num + 2))"
+            _draw
+        elif [[ "$key" == "j" ]]; then
+            _selected=$(( (_selected + 1) % _num ))
+            printf "\033[%dA" "$((_num + 2))"
+            _draw
+        elif [[ "$key" == $'\x03' ]]; then
+            printf "\033[?25h"
+            return 130
+        elif [[ "$key" == "" ]]; then
+            printf "\033[?25h"
+            printf -v "$_out_var" "%s" "${_items[$_selected]}"
+            return 0
+        fi
+    done
+}
+
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     watch_floating_state &
     WATCHER_PID=$!
@@ -97,14 +185,22 @@ while true; do
             printf "%8s %7s MB %6s%%    %s%s\n", $1, int($2/1024), $3, $5, tag
         }' | head -n 5)
 
-    BBLANK=$(printf '\xE2\xA0\x80')
-    LIST=$(echo "$LIST" | sed "s/^/$BBLANK/g")
-    TILE_ACTION=$(get_tile_action_label)
-    NAV_HELP=$(printf "\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m" "$TILE_ACTION")
-    COLUMNS=$(printf "%s  %8s %10s %7s    %s" "$BBLANK" "PID" "RAM" "MEM %" "APP")
-    HEADER_TEXT=$(printf "\n\033[1;33mTop 5 Memory Consumers:\033[0m\n%s\n\033[1;36m%s\033[0m" "$NAV_HELP" "$COLUMNS")
+    mapfile -t PROC_LIST < <(printf "%s" "$LIST" | grep -v '^[[:space:]]*$')
 
-    TARGET=$(echo -e "$LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=5)
+    if [ ${#PROC_LIST[@]} -eq 0 ]; then
+        gum style --foreground 220 --margin "1 7" "No high memory processes found."
+        sleep 1.5
+        continue
+    fi
+
+    COLUMNS=$(printf "   %8s %10s %7s    %s" "PID" "RAM" "MEM %" "APP")
+    HEADER_TEXT=$(printf "\n\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+    NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
+
+    TARGET=""
+    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET; then
+        exit 130
+    fi
 
     # If layout switched between tiled and floating while user was on screen, refresh cleanly
     if [ -f "$FLOAT_CHANGED_FLAG" ]; then
@@ -115,9 +211,6 @@ while true; do
     if [ -z "$TARGET" ]; then
         exit 130
     fi
-
-    # Strip the Braille Blank hack before extracting values
-    TARGET=$(echo "$TARGET" | sed "s/$BBLANK//g")
 
     PID=$(echo "$TARGET" | awk '{print $1}')
     
@@ -150,34 +243,27 @@ while true; do
 
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
-    ACTION_TILE_ACTION=$(get_tile_action_label)
-    ACTION_NAV=$(printf "\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m" "$ACTION_TILE_ACTION")
-
     if [ "$PROC_STATE" = "T" ]; then
-        ACTION_HEADER=$(printf "\n\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:\n%s" "$ACTION_NAV")
+        ACTION_HEADER=$(printf "\n\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
         TOGGLE_ACTION="▶️ Resume (SIGCONT)"
         AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
     else
-        ACTION_HEADER=$(printf "\n\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:\n%s" "$ACTION_NAV")
+        ACTION_HEADER=$(printf "\n\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
         TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
 
-    ACTION_LIST=$(printf "%s\n%s\n%s\n%s\n%s" \
-        "💀 Kill Process" \
-        "🔄 Restart Process" \
-        "$TOGGLE_ACTION" \
-        "$AI_ACTION" \
-        "🔙 Back to List")
+    ACTION_ITEMS=(
+        "💀 Kill Process"
+        "🔄 Restart Process"
+        "$TOGGLE_ACTION"
+        "$AI_ACTION"
+        "🔙 Back to List"
+    )
+    ACTION_NAV="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m"
 
-    ACTION=$(echo -e "$ACTION_LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" --height=5)
-
-    if [ -f "$FLOAT_CHANGED_FLAG" ]; then
-        rm -f "$FLOAT_CHANGED_FLAG"
-        continue
-    fi
-
-    if [ -z "$ACTION" ]; then
+    ACTION=""
+    if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION; then
         continue
     fi
 
