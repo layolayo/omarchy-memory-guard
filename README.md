@@ -14,12 +14,12 @@ A native Omarchy shell widget that monitors system memory and provides an intera
 
 Add this plugin to Omarchy using the CLI:
 ```bash
-omarchy plugin add https://github.com/YOUR_USERNAME/omarchy-memory-guard
+omarchy plugin add https://github.com/layolayo/omarchy-memory-guard
 ```
 
 ## Setup
 
 Move the widget into your bar:
 ```bash
-omarchy bar put matthew.memory-guard --section center
+omarchy bar put io.github.layolayo.memory-guard --section center
 ```
