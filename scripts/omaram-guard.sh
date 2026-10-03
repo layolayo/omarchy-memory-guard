@@ -52,7 +52,7 @@ while true; do
     gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
     
     # Match the width of MEM_BOX (45 chars) and perfectly center it under the logo
-    gum style --border normal --border-foreground 212 --width 43 --align center --margin "1 7" "Selected Process: $NAME (PID $PID)"
+    gum style --border normal --border-foreground 196 --foreground 196 --width 43 --align center --margin "1 7" "Selected Process: $NAME (PID $PID)"
 
     ACTION_HEADER=$(printf "\033[1;33mSelect Action:\033[0m")
     ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" "💀 Kill Process" "⏸️ Pause (SIGSTOP)" "▶️ Resume (SIGCONT)" "🔙 Back to List")

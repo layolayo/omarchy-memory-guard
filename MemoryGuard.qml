@@ -15,7 +15,10 @@ BarWidget {
   }
 
   function manageMem() {
-    if (root.bar) root.bar.run("uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c 'source omarchy-restart-gum; $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/omaram-guard.sh'")
+    if (root.bar) {
+      root.bar.run("hyprctl eval 'o.window({ title = \"^(OMARAM-GUARD)$\" }, { float = true, center = true, size = { 465, 425 } })'")
+      root.bar.run("uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c 'source omarchy-restart-gum; $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/omaram-guard.sh'")
+    }
   }
 
   implicitWidth: button.implicitWidth
