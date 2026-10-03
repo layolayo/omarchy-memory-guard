@@ -9,6 +9,11 @@ When a process is paused (`SIGSTOP`) from **OMARAM Guard**, it is frozen on the 
 1. **Work from evidence:** The goal is an honest account of the process state, not guesswork. Separate clearly what `/proc` and logs **prove** from what you are **inferring**.
 2. **Diagnosis reads; it does not destroy:** The investigation inspects the process; it does not unpause, kill, or modify files without explicit user consent.
 3. **The process is alive:** Unlike a core dump from a crashed program, the process address space is completely intact in RAM. You have access to active file descriptors, memory maps, thread states, and environmental context.
+4. **Privacy & Data Protection Invariants:**
+   - **Never read `/proc/<pid>/environ`:** Environment variables routinely store API tokens, SSH/database secrets, and authorization keys.
+   - **Never dump or read `/proc/<pid>/mem`:** Raw memory pages can contain decrypted credentials and private in-memory documents.
+   - **Metadata only for open files:** Inspect `/proc/<pid>/fd/` symlinks solely to identify file paths, file extensions, and lock statuses. Never read the contents of personal user documents (`.txt`, `.pdf`, `.json`, etc.).
+   - **Redact secrets in reports:** If command lines or logs contain accidental tokens or sensitive parameters, mask them immediately with `[REDACTED]`.
 
 ---
 

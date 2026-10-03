@@ -30,6 +30,13 @@ kill -STOP "$pid" 2>/dev/null || true
 comm=$(cat "/proc/$pid/comm" 2>/dev/null || echo "unknown")
 exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "unknown")
 cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "$comm")
+# Sanitize and redact common inline credentials (passwords, tokens, API keys)
+clean_cmdline=$(printf '%s' "$cmdline" | sed -E \
+  -e 's/((key|token|secret|password|passwd|auth|bearer)=)[^ &]+/\1[REDACTED]/gI' \
+  -e 's/(--(token|key|secret|password|api-key|auth-token|private-key)[= ])[^ ]+/\1[REDACTED]/gI' \
+  -e 's/(-[pP])[ =][^ ]+/\1 [REDACTED]/g' \
+  -e 's/(Bearer )[a-zA-Z0-9_\-\.]+/Bearer [REDACTED]/gI')
+
 cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || echo "unknown")
 
 ppid=$(awk '/PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "1")
@@ -60,13 +67,18 @@ Target Process:
   Process:     $comm
   Parent:      $parent_comm (PID $ppid)
   Binary:      $exe
-  Command:     $cmdline
+  Command:     $clean_cmdline
   Working Dir: $cwd
   Memory RSS:  $rss_mb MB (~$pmem% of system RAM)
   Memory PSS:  $pss_mb MB
   Swap Used:   $swap_mb MB
   Threads:     $threads
   State:       PAUSED (SIGSTOP)
+
+Privacy Invariants:
+- NEVER read /proc/$pid/environ (contains sensitive environment tokens and secrets).
+- NEVER dump /proc/$pid/mem (contains raw memory bytes).
+- Inspect /proc/$pid/fd/ only to identify file paths and locks; NEVER read the file contents of private user documents.
 
 Investigation instructions:
 Follow the Omarchy memory investigation guide:
