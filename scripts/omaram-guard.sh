@@ -129,6 +129,7 @@ omaram_choose() {
     local _color="${5:-196}"
     local _selected=0
     local _num=${#_items[@]}
+    local ESC=$'\e'
     [ "$_num" -eq 0 ] && return 1
 
     printf "\033[?25l"

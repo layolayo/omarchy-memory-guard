@@ -5,7 +5,9 @@ set -euo pipefail
 # This avoids spawning subshells (free, awk) every 5 seconds.
 # MemAvailable is the Linux kernel's official metric for non-swap memory availability.
 
-if [[ ! -r /proc/meminfo ]]; then
+MEMINFO_FILE="${1:-/proc/meminfo}"
+
+if [[ ! -r "$MEMINFO_FILE" ]]; then
     exit 255
 fi
 
@@ -20,7 +22,7 @@ while read -r key val _; do
     if (( total > 0 && avail > 0 )); then
         break
     fi
-done < /proc/meminfo
+done < "$MEMINFO_FILE"
 
 if (( total <= 0 )); then
     exit 255
