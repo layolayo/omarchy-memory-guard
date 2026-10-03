@@ -76,12 +76,16 @@ Key objectives:
 1. Establish evidence: Read /proc/$pid/status and /proc/$pid/smaps_rollup to analyze whether this is private dirty heap (leak/active data) vs shared/file-backed cache.
 2. In-flight work & data safety: Inspect open file descriptors in /proc/$pid/fd/ to determine if unsaved files, database writes, or active sockets would be damaged by termination.
 3. Check journalctl _PID=$pid --since "15 minutes ago" --no-pager for error bursts or GC failure cycles.
-4. Report:
-   - What the process was actively working on
+4. Report & Next-Steps Action Menu:
+   - Summary of what the process was actively working on
    - The verified mechanism causing the memory bloat (distinguishing proven facts from inferences)
-   - Whether any unsaved user data is at risk
-   - Clear recommendation: Safe to Resume (kill -CONT $pid), Targeted Tab/File Closure, or Terminate (kill -9 $pid)
-   - Diagnostic discipline: Diagnosis reads; do not kill or resume the process without user confirmation.
+   - Data loss risk assessment (identifying unsaved files or database locks)
+   - Conclude by presenting a clear, numbered Action Menu and offer to execute the user's choice:
+     [1] 💀 Terminate: Run `kill -9 $pid` to immediately reclaim all RAM.
+     [2] 🔄 Clean Restart: Kill `$pid` and re-launch the application fresh with its original command line and working directory.
+     [3] ▶️ Resume: Run `kill -CONT $pid` if memory consumption was legitimate or user needs to save open work.
+     [4] 🎯 Targeted Reclaim: If this is a child renderer tab, worker, or sub-process, pinpoint the specific tab or task to close to preserve the main application.
+   - Diagnostic discipline: Diagnosis reads; always present the findings first and wait for the user to confirm before running a destructive signal or restart.
 PROMPT
 )
 

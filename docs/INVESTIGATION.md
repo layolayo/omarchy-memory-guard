@@ -57,7 +57,10 @@ Produce a concise, well-structured diagnostic report:
 4. **Data Safety & Collateral Damage:**
    - Will killing the process cause unsaved data loss?
    - Is it an isolated child (e.g., a single browser tab) where termination will only crash that tab without affecting the parent browser?
-5. **Clear Actionable Recommendations:**
-   - **Option A: Resume (`kill -CONT <pid>`)** — If the memory usage was legitimate and temporary, or if the user should resume briefly to save work before orderly shutdown.
-   - **Option B: Targeted Reclaim** — If closing a specific document, tab, or child thread can release memory without killing the process.
-   - **Option C: Terminate (`kill -9 <pid>`)** — If it is an unrecoverable leak or frozen loop, with advice on how to prevent recurrence upon restart.
+5. **Clear Actionable Recommendations & Execution:**
+   The report should conclude with an explicit, numbered Action Menu, and offer to execute the user's choice:
+   - **[1] 💀 Terminate (`kill -9 <pid>`)** — If it is an unrecoverable leak or frozen loop, immediately reclaim all RAM.
+   - **[2] 🔄 Clean Restart** — Terminate the frozen process and immediately re-launch a fresh instance using its original command line and working directory.
+   - **[3] ▶️ Resume (`kill -CONT <pid>`)** — If the memory usage was legitimate/temporary, or if the user needs to resume briefly to save work before orderly exit.
+   - **[4] 🎯 Targeted Reclaim** — If closing a specific child tab, document, or thread can free memory without bringing down the entire parent application.
+
