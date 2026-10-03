@@ -10,7 +10,7 @@ A native Omarchy shell widget that monitors system memory, dispatches proactive 
 ## Features
 - **Live Memory Indicator & Proactive Alerts:** Changes from normal to amber (75%+) to red (90%+) on your top bar. Automatically fires Omarchy desktop notifications when RAM crosses 80% (Warning) and 90% (Critical).
 - **Click-to-Open Notifications:** Clicking any memory alert toast immediately opens the floating OMARAM Guard window.
-- **Floating Interactive Manager:** Clicking the bar widget or alert toast launches a perfectly sized (`465x425`), floating, centered terminal UI powered by `gum`.
+- **Floating Interactive Manager:** Clicking the bar widget or alert toast launches a perfectly sized (`465x480`), floating, centered terminal UI powered by `gum`.
 - **Context-Aware Process Actions:** Dynamically adapts available actions based on whether the selected application is actively running or already suspended:
   - `Restart Process`: Captures the process's working directory and command-line arguments, kills the bloated instance, and re-launches it fresh in the background to flush RAM instantly.
   - `Pause (SIGSTOP)`: (Shown when running) Freezes execution to halt runaway memory growth without losing unsaved application state.
@@ -18,7 +18,12 @@ A native Omarchy shell widget that monitors system memory, dispatches proactive 
   - `Diagnose with AI (SIGSTOP)`: Freezes the process and launches Omarchy's default AI agent (`omarchy-agent`) in a floating window to inspect memory allocations, open files, and journal logs to recommend `SIGCONT` vs `SIGKILL`.
   - `Kill (SIGKILL)`: Immediately terminates unresponsive processes.
 - **Zero Config Pollution:** Transient Hyprland floating rules applied ephemerally on launch without modifying your persistent configuration files.
-- **Hardened Security:** Strictly sandboxed to unprivileged user execution (`ps -U "$USER"`).
+- **Hardened Security & Privacy:**
+  - **Strict UID Ownership:** Signals (`SIGKILL`, `SIGSTOP`, `SIGCONT`) are only dispatched after verifying `/proc/$PID` ownership matches `$UID`.
+  - **Anti-Suicide Protection:** Self (`$$`), parent shell (`$PPID`), and terminal wrappers are barred from selection to prevent GUI freezing.
+  - **Automated Credential Redaction:** Masks tokens, passwords, database URLs, and API keys (`Bearer`, `sk-`, `ghp_`, `glpat-`, `xoxb-`) before passing to AI diagnostics.
+  - **Strict Privacy Invariants:** Enforces read-only inspections, banning `/proc/$PID/environ` and `/proc/$PID/mem` access.
+  - **Zero Subshell Overhead:** Reads `/proc/meminfo` directly without spawning subshells, with strict 0–100 bounds checking.
 
 ## Installation
 

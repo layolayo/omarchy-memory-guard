@@ -7,5 +7,5 @@ hyprctl eval 'o.window({ title = "^(OMARAM-GUARD)$" }, { float = true, center = 
 # Resolve plugin script directory dynamically
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Launch interactive TUI in floating terminal via uwsm
-exec uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c "source omarchy-restart-gum 2>/dev/null || true; \"$SCRIPT_DIR/omaram-guard.sh\""
+# Launch interactive TUI in floating terminal via setsid and uwsm
+exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c "source omarchy-restart-gum 2>/dev/null || true; exec \"$SCRIPT_DIR/omaram-guard.sh\""

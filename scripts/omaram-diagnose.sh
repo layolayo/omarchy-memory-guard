@@ -2,11 +2,12 @@
 # OMARAM Guard - AI Process Memory Diagnosis
 # Pauses an offending process via SIGSTOP and launches an Omarchy AI agent to diagnose the memory bloat.
 
-set -uo pipefail
+set -euo pipefail
 
 pid=${1:?usage: omaram-diagnose <pid>}
 
-if [[ ! $pid =~ ^[0-9]+$ ]]; then
+# Validate PID: must be positive numeric integer > 1 and not current/parent process
+if [[ ! $pid =~ ^[0-9]+$ ]] || (( pid <= 1 )) || (( pid == $$ )) || (( pid == PPID )); then
   echo "Invalid PID: $pid" >&2
   exit 1
 fi
@@ -30,17 +31,31 @@ kill -STOP "$pid" 2>/dev/null || true
 comm=$(cat "/proc/$pid/comm" 2>/dev/null || echo "unknown")
 exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "unknown")
 cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "$comm")
-# Sanitize and redact common inline credentials (passwords, tokens, API keys)
+
+# Sanitize and redact inline credentials (passwords, tokens, API keys, basic auth URLs)
 clean_cmdline=$(printf '%s' "$cmdline" | sed -E \
-  -e 's/((key|token|secret|password|passwd|auth|bearer)=)[^ &]+/\1[REDACTED]/gI' \
-  -e 's/(--(token|key|secret|password|api-key|auth-token|private-key)[= ])[^ ]+/\1[REDACTED]/gI' \
-  -e 's/(-[pP])[ =][^ ]+/\1 [REDACTED]/g' \
-  -e 's/(Bearer )[a-zA-Z0-9_\-\.]+/Bearer [REDACTED]/gI')
+  -e 's|://([^/:]+):([^/@]+)@|://\1:[REDACTED]@|g' \
+  -e 's/((key|token|secret|password|passwd|auth|bearer|credential|api_key|apikey)=)[^ &"'\''\t\n]+/\1[REDACTED]/gI' \
+  -e 's/(--(token|key|secret|password|api-key|auth-token|private-key|access-token|client-secret)[= ])[^ "'\''\t\n]+/\1[REDACTED]/gI' \
+  -e 's/(-[pPuU])[ =][^ "'\''\t\n]+/\1 [REDACTED]/g' \
+  -e 's/(Bearer )[a-zA-Z0-9_\-\.]+/Bearer [REDACTED]/gI' \
+  -e 's/(ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36,}/[REDACTED_GITHUB_TOKEN]/g' \
+  -e 's/github_pat_[a-zA-Z0-9_]{50,}/[REDACTED_GITHUB_PAT]/g' \
+  -e 's/glpat-[a-zA-Z0-9\-]{20,}/[REDACTED_GITLAB_TOKEN]/g' \
+  -e 's/xox[baprs]-[a-zA-Z0-9\-]+/[REDACTED_SLACK_TOKEN]/g' \
+  -e 's/sk-[a-zA-Z0-9_\-]{20,}/[REDACTED_API_KEY]/g')
+
+# Sanitize strings to strip binary control characters
+clean_cmdline=$(printf '%s' "$clean_cmdline" | tr -cd '[:print:]\t\n')
+comm=$(printf '%s' "$comm" | tr -cd '[:print:]')
+exe=$(printf '%s' "$exe" | tr -cd '[:print:]')
 
 cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || echo "unknown")
+cwd=$(printf '%s' "$cwd" | tr -cd '[:print:]')
 
 ppid=$(awk '/PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "1")
 parent_comm=$(cat "/proc/$ppid/comm" 2>/dev/null || echo "unknown")
+parent_comm=$(printf '%s' "$parent_comm" | tr -cd '[:print:]')
 
 rss_kb=$(awk '/VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "0")
 rss_mb=$((rss_kb / 1024))
@@ -52,9 +67,13 @@ pss_kb=$(awk '/^Pss:/ {print $2}' "/proc/$pid/smaps_rollup" 2>/dev/null || echo 
 pss_mb=$((pss_kb / 1024))
 
 total_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "1")
-pmem=$((rss_kb * 100 / total_kb))
+pmem=$((rss_kb * 100 / (total_kb > 0 ? total_kb : 1)))
 
-docs="$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/docs/INVESTIGATION.md"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+docs="$SCRIPT_DIR/../docs/INVESTIGATION.md"
+if [[ ! -f "$docs" ]]; then
+  docs="$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/docs/INVESTIGATION.md"
+fi
 
 # 3. Construct structured prompt for the Omarchy coding agent
 prompt=$(cat <<PROMPT

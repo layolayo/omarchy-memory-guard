@@ -1,4 +1,5 @@
 #!/bin/bash
+set -u
 
 # Request snug terminal resize (if supported)
 LOGO=$(cat << 'ASCII'
@@ -13,6 +14,7 @@ ASCII
 
 # Set standard X11 window title
 printf "\033]0;OMARAM-GUARD\007"
+
 while true; do
     clear
 
@@ -28,11 +30,12 @@ while true; do
     MEM_BOX=$(echo "$MEM_BOX" | sed $'s/.*/\033[38;5;135m&\033[0m/')
     gum style --margin "0 7" "$MEM_BOX"
     
-    # Process List
-    LIST=$(ps -U "$USER" -o pid,rss,pmem,state,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{
-        tag = ($4 ~ /^T/ ? " ⏸️ PAUSED" : "");
-        printf "%8s %7s MB %6s%%    %s%s\n", $1, int($2/1024), $3, $5, tag
-    }')
+    # Process List: Strictly filter by UID, exclude self, parent, and terminal wrappers
+    LIST=$(ps -u "$UID" --no-headers -o pid,rss,pmem,state,comm --sort=-rss 2>/dev/null | awk -v self="$$" -v parent="$PPID" '
+        $1 != self && $1 != parent && $5 !~ /^(omaram|gum|bash|ps|xdg-terminal)/ {
+            tag = ($4 ~ /^T/ ? " ⏸️ PAUSED" : "");
+            printf "%8s %7s MB %6s%%    %s%s\n", $1, int($2/1024), $3, $5, tag
+        }' | head -n 5)
 
     BBLANK=$(printf '\xE2\xA0\x80')
     LIST=$(echo "$LIST" | sed "s/^/$BBLANK/g")
@@ -58,7 +61,24 @@ while true; do
     TARGET=$(echo "$TARGET" | sed "s/$BBLANK//g")
 
     PID=$(echo "$TARGET" | awk '{print $1}')
-    NAME=$(echo "$TARGET" | awk '{print $5}')
+    
+    # Security validation: Ensure PID is numeric, > 1, and not self/parent
+    if [[ ! "$PID" =~ ^[0-9]+$ ]] || [ "$PID" -le 1 ] || [ "$PID" -eq "$$" ] || [ "$PID" -eq "$PPID" ]; then
+        continue
+    fi
+
+    # Security validation: Ensure process exists and belongs to current user
+    if [[ ! -d "/proc/$PID" ]]; then
+        continue
+    fi
+    PROC_UID=$(stat -c '%u' "/proc/$PID" 2>/dev/null || true)
+    if [[ "$PROC_UID" != "$UID" ]]; then
+        continue
+    fi
+
+    NAME=$(cat "/proc/$PID/comm" 2>/dev/null || echo "process")
+    NAME=$(printf '%s' "$NAME" | tr -cd '[:print:]')
+    [ -z "$NAME" ] && NAME="process"
 
     clear
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
@@ -97,19 +117,27 @@ while true; do
 
     case "$ACTION" in
         *"Kill"*)
-            kill -9 "$PID" 2>/dev/null
+            kill -9 "$PID" 2>/dev/null || true
             gum style --foreground 196 --margin "1 2" "💀 Killed $NAME."
             sleep 1.5
             ;;
         *"Restart"*)
             CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || echo "$HOME")
+            if [[ ! -d "$CWD" ]]; then
+                CWD="$HOME"
+            fi
+            EXE=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
             mapfile -d '' CMD_ARGS < "/proc/$PID/cmdline" 2>/dev/null || true
             if [ ${#CMD_ARGS[@]} -eq 0 ]; then
-                CMD_ARGS=("$NAME")
+                if [[ -n "$EXE" && -x "$EXE" ]]; then
+                    CMD_ARGS=("$EXE")
+                else
+                    CMD_ARGS=("$NAME")
+                fi
             fi
-            kill -9 "$PID" 2>/dev/null
+            kill -9 "$PID" 2>/dev/null || true
             sleep 0.5
-            (cd "$CWD" && "${CMD_ARGS[@]}" >/dev/null 2>&1 & disown)
+            (cd "$CWD" && "${CMD_ARGS[@]}" </dev/null >/dev/null 2>&1 & disown)
             gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME cleanly."
             sleep 1.5
             ;;
@@ -120,12 +148,12 @@ while true; do
             sleep 2.5
             ;;
         *"Pause"*)
-            kill -STOP "$PID" 2>/dev/null
+            kill -STOP "$PID" 2>/dev/null || true
             gum style --foreground 220 --margin "1 2" "⏸️ Paused $NAME. Execution suspended."
             sleep 2
             ;;
         *"Resume"*)
-            kill -CONT "$PID" 2>/dev/null
+            kill -CONT "$PID" 2>/dev/null || true
             gum style --foreground 46 --margin "1 2" "▶️ Resumed $NAME."
             sleep 1.5
             ;;
