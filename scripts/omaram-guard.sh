@@ -37,12 +37,19 @@ while true; do
     BBLANK=$(printf '\xE2\xA0\x80')
     LIST=$(echo "$LIST" | sed "s/^/$BBLANK/g")
     COLUMNS=$(printf "%s  %8s %10s %7s    %s" "$BBLANK" "PID" "RAM" "MEM %" "APP")
-    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[2m[ Super + T: Tile  •  ESC: Quit ]\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
 
-    TARGET=$(echo "$LIST" | gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=7)
+    HELP_LINE=$(printf "\n\033[2m←↓↑→ navigate • enter submit • super+t tile • esc quit\033[0m")
+    FULL_LIST=$(printf "%s%s" "$LIST" "$HELP_LINE")
+
+    TARGET=$(echo -e "$FULL_LIST" | gum choose --no-show-help --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=8)
 
     if [ -z "$TARGET" ]; then
         exit 130
+    fi
+
+    if [[ "$TARGET" =~ "navigate" ]]; then
+        continue
     fi
 
     # Strip the Braille Blank hack before extracting values
@@ -61,21 +68,29 @@ while true; do
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
     if [ "$PROC_STATE" = "T" ]; then
-        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:\n\033[2m[ Super + T: Tile  •  ESC: Back ]\033[0m")
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
         TOGGLE_ACTION="▶️ Resume (SIGCONT)"
         AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
     else
-        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:\n\033[2m[ Super + T: Tile  •  ESC: Back ]\033[0m")
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
         TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
 
-    ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
+    ACTION_HELP=$(printf "\n\033[2m←↓↑→ navigate • enter submit • super+t tile • esc back\033[0m")
+    ACTION_LIST=$(printf "%s\n%s\n%s\n%s\n%s%s" \
         "💀 Kill Process" \
         "🔄 Restart Process" \
         "$TOGGLE_ACTION" \
         "$AI_ACTION" \
-        "🔙 Back to List")
+        "🔙 Back to List" \
+        "$ACTION_HELP")
+
+    ACTION=$(echo -e "$ACTION_LIST" | gum choose --no-show-help --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" --height=8)
+
+    if [[ "$ACTION" =~ "navigate" ]]; then
+        continue
+    fi
 
     case "$ACTION" in
         *"Kill"*)
