@@ -93,9 +93,9 @@ Key objectives:
    - The verified mechanism causing the memory bloat (distinguishing proven facts from inferences)
    - Data loss risk assessment (identifying unsaved files or database locks)
    - Conclude by presenting a clear, numbered Action Menu and offer to execute the user's choice:
-     [1] 💀 Terminate: Run `kill -9 $pid` to immediately reclaim all RAM.
-     [2] 🔄 Clean Restart: Kill `$pid` and re-launch the application fresh with its original command line and working directory.
-     [3] ▶️ Resume: Run `kill -CONT $pid` if memory consumption was legitimate or user needs to save open work.
+     [1] 💀 Terminate: Run \`kill -9 $pid\` to immediately reclaim all RAM.
+     [2] 🔄 Clean Restart: Kill \$pid and re-launch the application fresh with its original command line and working directory.
+     [3] ▶️ Resume: Run \`kill -CONT $pid\` if memory consumption was legitimate or user needs to save open work.
      [4] 🎯 Targeted Reclaim: If this is a child renderer tab, worker, or sub-process, pinpoint the specific tab or task to close to preserve the main application.
    - Diagnostic discipline: Diagnosis reads; always present the findings first and wait for the user to confirm before running a destructive signal or restart.
 PROMPT
