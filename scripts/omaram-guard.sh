@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Request snug terminal resize (if supported)
-printf '\033[8;25;65t'
+printf '\033[8;25;60t'
 
 LOGO=$(cat << 'ASCII'
   ██████╗ ███╗   ███╗ █████╗ ██████╗  █████╗ ███╗   ███╗
@@ -17,7 +17,8 @@ while true; do
     clear
 
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
-    gum style --foreground 245 --margin "0 0 1 2" "The High Memory Guard & Diagnostic Tool"
+    # Logo is 56 chars. Subtitle is 39 chars. Margin of 10 perfectly centers it under the logo (2 + 8).
+    gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
 
     # Memory Stats Box
     # Using awk to cleanly strip 'Mem:' and perfectly align the columns
@@ -43,6 +44,7 @@ while true; do
 
     clear
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
+    gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
     
     ACTION_BOX=$(gum style --border normal --border-foreground 212 --padding "1 3" "Selected Process: $NAME (PID $PID)")
     gum style --margin "1 2" "$ACTION_BOX"
