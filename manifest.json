@@ -4,7 +4,7 @@
   "name": "OMARAM Guard",
   "version": "1.0.0",
   "author": "layolayo",
-  "description": "The High Memory Guard "description": "Monitors memory usage and alerts when high" Diagnostic Tool.",
+  "description": "The High Memory Guard & Diagnostic Tool.",
   "kinds": [
     "bar-widget"
   ],
