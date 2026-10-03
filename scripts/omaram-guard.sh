@@ -29,7 +29,10 @@ while true; do
     gum style --margin "0 7" "$MEM_BOX"
     
     # Process List
-    LIST=$(ps -U "$USER" -o pid,rss,pmem,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{printf "%8s %7s MB %6s%%    %s\n", $1, int($2/1024), $3, $4}')
+    LIST=$(ps -U "$USER" -o pid,rss,pmem,state,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{
+        tag = ($4 ~ /^T/ ? " ⏸️ PAUSED" : "");
+        printf "%8s %7s MB %6s%%    %s%s\n", $1, int($2/1024), $3, $5, tag
+    }')
 
     BBLANK=$(printf '\xE2\xA0\x80')
     LIST=$(echo "$LIST" | sed "s/^/$BBLANK/g")
