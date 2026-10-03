@@ -41,31 +41,39 @@ get_tile_action_label() {
 # Auto-tile OMARAM window if it is currently floating so AI diagnosis fits side-by-side
 tile_if_floating() {
     if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-        local active_json addr is_floating is_omaram omaram_client
-        active_json=$(hyprctl activewindow -j 2>/dev/null || true)
-        is_omaram=$(echo "$active_json" | jq -r '(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") // false' 2>/dev/null || echo "false")
-
-        if [[ "$is_omaram" == "true" ]]; then
-            is_floating=$(echo "$active_json" | jq -r 'if .floating == true then "true" else "false" end' 2>/dev/null || echo "false")
-            addr=$(echo "$active_json" | jq -r '.address // ""' 2>/dev/null || echo "")
-        else
-            omaram_client=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") | "\(.address) \(.floating)"' 2>/dev/null | head -1)
-            addr=$(echo "$omaram_client" | awk '{print $1}')
-            is_floating=$(echo "$omaram_client" | awk '{print $2}')
-        fi
-
-        if [[ "$is_floating" == "true" ]]; then
-            if [[ -n "$addr" ]]; then
-                hyprctl dispatch "hl.dsp.window.float({ window = \"address:$addr\", action = \"off\" })" >/dev/null 2>&1 || \
-                hyprctl dispatch togglefloating "address:$addr" >/dev/null 2>&1 || \
-                hyprctl dispatch togglefloating >/dev/null 2>&1 || true
-            else
-                hyprctl dispatch "hl.dsp.window.float({ action = \"off\" })" >/dev/null 2>&1 || \
-                hyprctl dispatch togglefloating >/dev/null 2>&1 || true
-            fi
-        fi
+        hyprctl eval 'for _, w in ipairs(hl.get_windows()) do if w.class == "org.omarchy.terminal.omaram" or w.title == "OMARAM-GUARD" then if w.floating then hl.dispatch(hl.dsp.window.float({ window = w, action = "off" })) end; break end end' >/dev/null 2>&1 || true
     fi
 }
+
+# Watch for floating mode changes in background so the navigation hint updates live when super+t is pressed
+FLOAT_CHANGED_FLAG=$(mktemp -t omaram-float-XXXXXX 2>/dev/null || echo "/tmp/omaram-float-$$.flag")
+CURRENT_TTY=$(tty 2>/dev/null || true)
+CURRENT_TTY_NAME="${CURRENT_TTY#/dev/}"
+
+watch_floating_state() {
+    local last_state
+    last_state=$(get_tile_action_label)
+    while true; do
+        sleep 0.25
+        local cur_state
+        cur_state=$(get_tile_action_label)
+        if [[ -n "$last_state" && "$cur_state" != "$last_state" ]]; then
+            touch "$FLOAT_CHANGED_FLAG"
+            if [[ -n "$CURRENT_TTY_NAME" ]]; then
+                pkill -t "$CURRENT_TTY_NAME" -x gum 2>/dev/null || true
+            fi
+        fi
+        last_state="$cur_state"
+    done
+}
+
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    watch_floating_state &
+    WATCHER_PID=$!
+    trap 'rm -f "$FLOAT_CHANGED_FLAG"; kill "$WATCHER_PID" 2>/dev/null || true' EXIT
+else
+    trap 'rm -f "$FLOAT_CHANGED_FLAG"' EXIT
+fi
 
 while true; do
     clear
@@ -95,10 +103,16 @@ while true; do
     HEADER_TEXT=$(printf "\n\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
 
     TILE_ACTION=$(get_tile_action_label)
-    HELP_LINE=$(printf "\n \n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t %s • esc quit\033[0m" "$TILE_ACTION")
+    HELP_LINE=$(printf "\n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t %s • esc quit\033[0m" "$TILE_ACTION")
     FULL_LIST=$(printf "%s%s" "$LIST" "$HELP_LINE")
 
-    TARGET=$(echo -e "$FULL_LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=9)
+    TARGET=$(echo -e "$FULL_LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=8)
+
+    # If layout switched between tiled and floating while user was on screen, refresh cleanly
+    if [ -f "$FLOAT_CHANGED_FLAG" ]; then
+        rm -f "$FLOAT_CHANGED_FLAG"
+        continue
+    fi
 
     if [ -z "$TARGET" ]; then
         exit 130
@@ -155,7 +169,7 @@ while true; do
     fi
 
     ACTION_TILE_ACTION=$(get_tile_action_label)
-    ACTION_HELP=$(printf "\n \n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t %s • esc back\033[0m" "$ACTION_TILE_ACTION")
+    ACTION_HELP=$(printf "\n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t %s • esc back\033[0m" "$ACTION_TILE_ACTION")
     ACTION_LIST=$(printf "%s\n%s\n%s\n%s\n%s%s" \
         "💀 Kill Process" \
         "🔄 Restart Process" \
@@ -164,7 +178,16 @@ while true; do
         "🔙 Back to List" \
         "$ACTION_HELP")
 
-    ACTION=$(echo -e "$ACTION_LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" --height=9)
+    ACTION=$(echo -e "$ACTION_LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" --height=8)
+
+    if [ -f "$FLOAT_CHANGED_FLAG" ]; then
+        rm -f "$FLOAT_CHANGED_FLAG"
+        continue
+    fi
+
+    if [ -z "$ACTION" ]; then
+        continue
+    fi
 
     CLEAN_ACTION=$(echo "$ACTION" | sed "s/$BBLANK//g" | tr -d '[:space:]')
     if [ -z "$CLEAN_ACTION" ] || [[ "$ACTION" =~ "navigate" ]]; then

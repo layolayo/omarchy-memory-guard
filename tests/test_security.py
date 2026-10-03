@@ -194,7 +194,13 @@ class GuardSecurityTests(unittest.TestCase):
         self.assertIn("tile_if_floating", self.content)
         self.assertIn("is_floating", self.content)
         self.assertIn("hl.dsp.window.float", self.content)
-        self.assertIn("action = \\\"off\\\"", self.content)
+        self.assertTrue('action = "off"' in self.content or 'action = \\"off\\"' in self.content)
+
+    def test_live_floating_watcher_present(self):
+        # Must monitor floating state in background so navigation footer updates live when super+t is pressed
+        self.assertIn("watch_floating_state", self.content)
+        self.assertIn("FLOAT_CHANGED_FLAG", self.content)
+        self.assertIn("pkill -t", self.content)
 
     def test_dynamic_navigation_tile_float_label(self):
         # Must detect whether window is floating or tiled and adjust navigation label
