@@ -15,7 +15,7 @@ BarWidget {
   }
 
   function manageMem() {
-    if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/omaram-guard.sh")
+    if (root.bar) root.bar.run("uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c 'source omarchy-restart-gum; $HOME/.config/omarchy/plugins/matthew.memory-guard/scripts/omaram-guard.sh'")
   }
 
   implicitWidth: button.implicitWidth
@@ -49,7 +49,7 @@ BarWidget {
     active: root.memPct >= 75
     activeColor: root.memPct >= 90 ? "#ff4444" : "#ffaa00"
     
-    tooltipText: "High memory usage! Click to manage."
+    tooltipText: root.memPct >= 75 ? "High memory usage! Click to manage." : "OMARAM Guard active. Click to manage."
     onPressed: function() { root.manageMem() }
   }
 }
