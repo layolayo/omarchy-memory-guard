@@ -9,6 +9,8 @@ BarWidget {
   moduleName: "io.github.layolayo.memory-guard"
 
   property int memPct: 0
+  property int lastAlertLevel: 0    // 0: normal (<80), 1: warning (80-89), 2: critical (90+)
+  property double lastAlertTime: 0  // Milliseconds epoch timestamp
 
   function refresh() {
     if (!memProc.running) memProc.running = true
@@ -16,8 +18,35 @@ BarWidget {
 
   function manageMem() {
     if (root.bar) {
-      root.bar.run("hyprctl eval 'o.window({ title = \"^(OMARAM-GUARD)$\" }, { float = true, center = true, size = { 465, 425 } })'")
-      root.bar.run("uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal.omaram --title=OMARAM-GUARD -e bash -c 'source omarchy-restart-gum; $HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/scripts/omaram-guard.sh'")
+      root.bar.run("$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/scripts/launch-omaram.sh")
+    }
+  }
+
+  function checkAlerts(pct) {
+    var now = Date.now()
+    var launcher = "$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/scripts/launch-omaram.sh"
+
+    if (pct >= 90) {
+      // Critical Alert: trigger if escalating to level 2, or if 3 minutes have passed since last alert
+      if (root.lastAlertLevel < 2 || (now - root.lastAlertTime > 180000)) {
+        root.lastAlertLevel = 2
+        root.lastAlertTime = now
+        if (root.bar) {
+          root.bar.run("omarchy-notification-send --app-name 'OMARAM Guard' -g '󰍛' -u critical 'Critical Memory: " + pct + "% Used' 'System memory is critically low! Click to open OMARAM Guard.' --exec " + launcher)
+        }
+      }
+    } else if (pct >= 80) {
+      // Warning Alert: trigger if escalating to level 1, or if 5 minutes have passed since last alert
+      if (root.lastAlertLevel < 1 || (now - root.lastAlertTime > 300000)) {
+        root.lastAlertLevel = 1
+        root.lastAlertTime = now
+        if (root.bar) {
+          root.bar.run("omarchy-notification-send --app-name 'OMARAM Guard' -g '󰍛' -u normal 'High Memory Warning: " + pct + "% Used' 'Click to open OMARAM Guard and manage processes.' --exec " + launcher)
+        }
+      }
+    } else if (pct < 75) {
+      // Reset alert level when memory returns to safe thresholds
+      root.lastAlertLevel = 0
     }
   }
 
@@ -29,6 +58,7 @@ BarWidget {
     command: ["/bin/bash", "-c", "$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/scripts/check-mem-pct.sh"]
     onExited: function(exitCode) {
       root.memPct = exitCode
+      root.checkAlerts(exitCode)
     }
   }
 

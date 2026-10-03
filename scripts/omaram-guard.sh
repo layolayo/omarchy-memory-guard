@@ -55,13 +55,19 @@ while true; do
     gum style --border normal --border-foreground 196 --foreground 196 --width 43 --align center --margin "1 7" "Selected Process: $NAME (PID $PID)"
 
     ACTION_HEADER=$(printf "\033[1;33mSelect Action:\033[0m")
-    ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" "💀 Kill Process" "⏸️ Pause (SIGSTOP)" "▶️ Resume (SIGCONT)" "🔙 Back to List")
+    ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" "💀 Kill Process" "⏸️ Pause (SIGSTOP)" "🤖 Diagnose with AI (SIGSTOP)" "▶️ Resume (SIGCONT)" "🔙 Back to List")
 
     case "$ACTION" in
         *"Kill"*)
             kill -9 "$PID" 2>/dev/null
             gum style --foreground 196 --margin "1 2" "💀 Killed $NAME."
             sleep 1.5
+            ;;
+        *"Diagnose"*)
+            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+            "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" >/dev/null 2>&1 &
+            gum style --foreground 51 --margin "1 2" "⏸️ Paused $NAME & launched AI diagnostic agent."
+            sleep 2.5
             ;;
         *"Pause"*)
             kill -STOP "$PID" 2>/dev/null
