@@ -185,6 +185,22 @@ class GuardSecurityTests(unittest.TestCase):
         # Must verify exe fallback
         self.assertIn('readlink -f "/proc/$PID/exe"', self.content)
 
+    def test_sandbox_confinement_guards(self):
+        # Must inspect namespaces, root, flatpak, and cgroups to detect confined processes
+        self.assertIn("is_confined_or_sandboxed", self.content)
+        self.assertIn('/proc/$$/ns/mnt', self.content)
+        self.assertIn('/proc/$$/ns/user', self.content)
+        self.assertIn('/proc/$$/ns/pid', self.content)
+        self.assertIn('.flatpak-info', self.content)
+        self.assertIn('app-flatpak', self.content)
+
+    def test_prevents_host_cmdline_substitution(self):
+        # Must enforce that executed binary is kernel-verified EXE, not mutable argv[0]
+        self.assertIn('CMD_ARGS[0]="$EXE"', self.content)
+        # Must reject interpreter inline code flags (-c, -e, --eval, --command)
+        self.assertIn('has_inline_code=1', self.content)
+        self.assertIn('inline interpreter code', self.content)
+
     def test_prctl_basename_sanitization(self):
         # Must strip path components from process name
         self.assertIn("${NAME##*/}", self.content)

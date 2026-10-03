@@ -17,6 +17,9 @@ When a process is paused (`SIGSTOP`) from **OMARAM Guard**, it is frozen on the 
 5. **Ephemeral File Hygiene:**
    - If generating intermediate diagnostic summaries or memory analysis dumps, write only to a fresh `mktemp -t omaram-XXXXXX` path rather than a predictable shared location.
    - Clean up with a trap (`trap 'rm -f "$tmp"' EXIT`) and delete temporary artifacts before exiting—never leave memory snapshots or diagnostic dumps lying in `/tmp`.
+6. **Sandbox Boundary Preservation:**
+   - Confined applications (Flatpak, Snap, bubblewrap, or containerized environments) must preserve their containment boundaries.
+   - Never execute mutable command-line arguments on the unconfined host for sandboxed processes. Restart confined processes strictly through their original container launcher (e.g. `flatpak run <app-id>`) or defer to the desktop application launcher.
 
 ---
 
@@ -68,7 +71,7 @@ Produce a concise, well-structured diagnostic report:
 5. **Clear Actionable Recommendations & Execution:**
    The report should conclude with an explicit, numbered Action Menu, and offer to execute the user's choice:
    - **[1] 💀 Terminate (`kill -9 <pid>`)** — If it is an unrecoverable leak or frozen loop, immediately reclaim all RAM.
-   - **[2] 🔄 Clean Restart** — Terminate the frozen process and immediately re-launch a fresh instance using its original command line and working directory.
+   - **[2] 🔄 Clean Restart** — Terminate the frozen process and re-launch a fresh instance using its original command line and working directory, while strictly preserving sandbox boundaries (re-launching Flatpaks via `flatpak run` and skipping host restarts for confined/containerized processes).
    - **[3] ▶️ Resume (`kill -CONT <pid>`)** — If the memory usage was legitimate/temporary, or if the user needs to resume briefly to save work before orderly exit.
    - **[4] 🎯 Targeted Reclaim** — If closing a specific child tab, document, or thread can free memory without bringing down the entire parent application.
 6. **Provenance Signing:**

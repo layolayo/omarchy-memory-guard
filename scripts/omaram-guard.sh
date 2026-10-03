@@ -45,6 +45,56 @@ tile_if_floating() {
     fi
 }
 
+# Detect whether a process is running inside a sandbox or container (Flatpak, Snap, bwrap, Docker, or isolated namespaces)
+# to prevent sandbox escape vulnerabilities during process restart.
+is_confined_or_sandboxed() {
+    local target_pid="$1"
+    [[ -d "/proc/$target_pid" ]] || return 1
+
+    # 1. Mount namespace check: If target mount namespace differs from host shell
+    local host_mnt target_mnt
+    host_mnt=$(readlink "/proc/$$/ns/mnt" 2>/dev/null || readlink "/proc/1/ns/mnt" 2>/dev/null || true)
+    target_mnt=$(readlink "/proc/$target_pid/ns/mnt" 2>/dev/null || true)
+    if [[ -n "$host_mnt" && -n "$target_mnt" && "$host_mnt" != "$target_mnt" ]]; then
+        return 0
+    fi
+
+    # 2. User namespace check
+    local host_user target_user
+    host_user=$(readlink "/proc/$$/ns/user" 2>/dev/null || readlink "/proc/1/ns/user" 2>/dev/null || true)
+    target_user=$(readlink "/proc/$target_pid/ns/user" 2>/dev/null || true)
+    if [[ -n "$host_user" && -n "$target_user" && "$host_user" != "$target_user" ]]; then
+        return 0
+    fi
+
+    # 3. PID namespace check
+    local host_pid_ns target_pid_ns
+    host_pid_ns=$(readlink "/proc/$$/ns/pid" 2>/dev/null || true)
+    target_pid_ns=$(readlink "/proc/$target_pid/ns/pid" 2>/dev/null || true)
+    if [[ -n "$host_pid_ns" && -n "$target_pid_ns" && "$host_pid_ns" != "$target_pid_ns" ]]; then
+        return 0
+    fi
+
+    # 4. Root filesystem check: Chroot or alternate root
+    local target_root
+    target_root=$(readlink -f "/proc/$target_pid/root" 2>/dev/null || true)
+    if [[ -n "$target_root" && "$target_root" != "/" ]]; then
+        return 0
+    fi
+
+    # 5. Flatpak environment detection
+    if [[ -e "/proc/$target_pid/root/.flatpak-info" ]]; then
+        return 0
+    fi
+
+    # 6. Container or sandbox cgroups (Flatpak, Snap, Podman, Docker, bwrap)
+    if grep -q -E "(app-flatpak|snap\.|docker|containerd|bwrap|sandbox)" "/proc/$target_pid/cgroup" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Watch for floating mode changes in background so the navigation hint updates live when super+t is pressed
 FLOAT_CHANGED_FLAG=$(mktemp -t omaram-float-XXXXXX 2>/dev/null || echo "/tmp/omaram-float-$$.flag")
 CURRENT_TTY=$(tty 2>/dev/null || true)
@@ -275,19 +325,71 @@ while true; do
             sleep 1.5
             ;;
         *"Restart"*)
+            # Security verification: Preserve sandbox boundaries and prevent sandbox escape.
+            # A confined same-user application without host-execution permissions must not be executed on the host.
+            if is_confined_or_sandboxed "$PID"; then
+                local flatpak_app_id=""
+                if [[ -f "/proc/$PID/root/.flatpak-info" ]]; then
+                    flatpak_app_id=$(awk -F= '/^app-id=/ {print $2}' "/proc/$PID/root/.flatpak-info" 2>/dev/null || true)
+                fi
+
+                if [[ -n "$flatpak_app_id" && "$flatpak_app_id" =~ ^[a-zA-Z0-9._-]+$ ]] && command -v flatpak >/dev/null 2>&1; then
+                    kill -9 "$PID" 2>/dev/null || true
+                    sleep 0.5
+                    (cd "$HOME" && flatpak run "$flatpak_app_id" </dev/null >/dev/null 2>&1 & disown)
+                    gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME via Flatpak sandbox launcher."
+                    sleep 1.5
+                else
+                    # For all other confined processes (containers, namespaces, bwrap, custom sandboxes),
+                    # skip host restart to preserve the sandbox boundary and prevent host code execution.
+                    gum style --foreground 220 --margin "1 2" "⚠️ $NAME is running inside a sandbox/container."
+                    gum style --foreground 244 --margin "0 2" "Host restart skipped for security; please use its application launcher."
+                    sleep 3
+                fi
+                continue
+            fi
+
+            # For unconfined host processes:
+            # 1. Resolve safe working directory
             CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || echo "$HOME")
             if [[ ! -d "$CWD" ]]; then
                 CWD="$HOME"
             fi
+
+            # 2. Kernel-verified binary from /proc/$PID/exe (cannot be forged by user process)
             EXE=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
-            mapfile -d '' CMD_ARGS < "/proc/$PID/cmdline" 2>/dev/null || true
-            if [ ${#CMD_ARGS[@]} -eq 0 ]; then
-                if [[ -n "$EXE" && -x "$EXE" ]]; then
-                    CMD_ARGS=("$EXE")
-                else
-                    CMD_ARGS=("$NAME")
-                fi
+            if [[ -z "$EXE" || "$EXE" != /* || ! -f "$EXE" || ! -x "$EXE" ]]; then
+                gum style --foreground 196 --margin "1 2" "❌ Cannot restart $NAME: binary missing or not executable."
+                sleep 2
+                continue
             fi
+
+            # 3. Read cmdline arguments
+            mapfile -d '' CMD_ARGS < "/proc/$PID/cmdline" 2>/dev/null || true
+
+            # 4. Enforce that the invoked executable is ALWAYS the verified kernel EXE,
+            # never an arbitrary or mutated string in CMD_ARGS[0].
+            CMD_ARGS[0]="$EXE"
+
+            # 5. Prevent interpreter code injection via mutated arguments:
+            # If the binary is a shell or interpreter, reject inline execution flags (-c, -e, --eval, --command)
+            local exe_basename="${EXE##*/}"
+            local has_inline_code=0
+            if [[ "$exe_basename" =~ ^(bash|sh|zsh|dash|python.*|perl|ruby|node|php)$ ]]; then
+                for arg in "${CMD_ARGS[@]:1}"; do
+                    if [[ "$arg" == "-c" || "$arg" == "-e" || "$arg" == "--eval" || "$arg" == "--command" ]]; then
+                        has_inline_code=1
+                        break
+                    fi
+                done
+            fi
+
+            if [ "$has_inline_code" -eq 1 ]; then
+                gum style --foreground 196 --margin "1 2" "❌ Cannot restart $NAME: inline interpreter code arguments rejected for safety."
+                sleep 2
+                continue
+            fi
+
             kill -9 "$PID" 2>/dev/null || true
             sleep 0.5
             (cd "$CWD" && "${CMD_ARGS[@]}" </dev/null >/dev/null 2>&1 & disown)
