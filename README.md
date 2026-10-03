@@ -11,11 +11,12 @@ A native Omarchy shell widget that monitors system memory, dispatches proactive 
 - **Live Memory Indicator & Proactive Alerts:** Changes from normal to amber (75%+) to red (90%+) on your top bar. Automatically fires Omarchy desktop notifications when RAM crosses 80% (Warning) and 90% (Critical).
 - **Click-to-Open Notifications:** Clicking any memory alert toast immediately opens the floating OMARAM Guard window.
 - **Floating Interactive Manager:** Clicking the bar widget or alert toast launches a perfectly sized (`465x425`), floating, centered terminal UI powered by `gum`.
-- **Safe Process Management:** Lists top memory-hungry applications dynamically. Allows you to:
-  - `Pause (SIGSTOP)`: Freeze runaway memory growth without losing unsaved application state.
-  - `Diagnose with AI (SIGSTOP)`: Freeze the process and launch Omarchy's default AI agent (`omarchy-agent`) in a floating window to inspect memory allocations, open files, and journal logs to recommend `SIGCONT` vs `SIGKILL`.
-  - `Resume (SIGCONT)`: Unfreeze a paused process once system pressure subsides.
-  - `Kill (SIGKILL)`: Immediately terminate unresponsive or runaway processes.
+- **Context-Aware Process Actions:** Dynamically adapts available actions based on whether the selected application is actively running or already suspended:
+  - `Restart Process`: Captures the process's working directory and command-line arguments, kills the bloated instance, and re-launches it fresh in the background to flush RAM instantly.
+  - `Pause (SIGSTOP)`: (Shown when running) Freezes execution to halt runaway memory growth without losing unsaved application state.
+  - `Resume (SIGCONT)`: (Shown when paused) Resumes a suspended process once system pressure subsides.
+  - `Diagnose with AI (SIGSTOP)`: Freezes the process and launches Omarchy's default AI agent (`omarchy-agent`) in a floating window to inspect memory allocations, open files, and journal logs to recommend `SIGCONT` vs `SIGKILL`.
+  - `Kill (SIGKILL)`: Immediately terminates unresponsive processes.
 - **Zero Config Pollution:** Transient Hyprland floating rules applied ephemerally on launch without modifying your persistent configuration files.
 - **Hardened Security:** Strictly sandboxed to unprivileged user execution (`ps -U "$USER"`).
 

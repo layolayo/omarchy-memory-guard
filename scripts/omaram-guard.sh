@@ -54,13 +54,42 @@ while true; do
     # Match the width of MEM_BOX (45 chars) and perfectly center it under the logo
     gum style --border normal --border-foreground 196 --foreground 196 --width 43 --align center --margin "1 7" "Selected Process: $NAME (PID $PID)"
 
-    ACTION_HEADER=$(printf "\033[1;33mSelect Action:\033[0m")
-    ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" "💀 Kill Process" "⏸️ Pause (SIGSTOP)" "🤖 Diagnose with AI (SIGSTOP)" "▶️ Resume (SIGCONT)" "🔙 Back to List")
+    PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
+
+    if [ "$PROC_STATE" = "T" ]; then
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
+        ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
+            "▶️ Resume (SIGCONT)" \
+            "🔄 Restart Process" \
+            "🤖 Diagnose with AI (Inspect Paused)" \
+            "💀 Kill Process" \
+            "🔙 Back to List")
+    else
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
+        ACTION=$(gum choose --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$ACTION_HEADER" \
+            "💀 Kill Process" \
+            "🔄 Restart Process" \
+            "⏸️ Pause (SIGSTOP)" \
+            "🤖 Diagnose with AI (SIGSTOP)" \
+            "🔙 Back to List")
+    fi
 
     case "$ACTION" in
         *"Kill"*)
             kill -9 "$PID" 2>/dev/null
             gum style --foreground 196 --margin "1 2" "💀 Killed $NAME."
+            sleep 1.5
+            ;;
+        *"Restart"*)
+            CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || echo "$HOME")
+            mapfile -d '' CMD_ARGS < "/proc/$PID/cmdline" 2>/dev/null || true
+            if [ ${#CMD_ARGS[@]} -eq 0 ]; then
+                CMD_ARGS=("$NAME")
+            fi
+            kill -9 "$PID" 2>/dev/null
+            sleep 0.5
+            (cd "$CWD" && "${CMD_ARGS[@]}" >/dev/null 2>&1 & disown)
+            gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME cleanly."
             sleep 1.5
             ;;
         *"Diagnose"*)
