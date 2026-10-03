@@ -196,6 +196,43 @@ class GuardSecurityTests(unittest.TestCase):
         self.assertIn("hl.dsp.window.float", self.content)
         self.assertIn("action = \\\"off\\\"", self.content)
 
+    def test_dynamic_navigation_tile_float_label(self):
+        # Must detect whether window is floating or tiled and adjust navigation label
+        self.assertIn("get_tile_action_label", self.content)
+        self.assertIn("super+t %s • esc quit", self.content)
+        self.assertIn("super+t %s • esc back", self.content)
+
+        # Test the function logic with mocked floating states
+        test_script_tiled = """
+        source <(sed -n '/^get_tile_action_label()/,/^}/p' "$1")
+        hyprctl() {
+            if [ "$1" = "activewindow" ]; then
+                echo '{"class": "org.omarchy.terminal.omaram", "floating": false}'
+            fi
+        }
+        export -f hyprctl
+        export HYPRLAND_INSTANCE_SIGNATURE="mock"
+        get_tile_action_label
+        """
+        res_tiled = subprocess.run(["bash", "-c", test_script_tiled, "_", str(self.script)], capture_output=True, text=True)
+        self.assertEqual(res_tiled.returncode, 0)
+        self.assertEqual(res_tiled.stdout.strip(), "float")
+
+        test_script_floating = """
+        source <(sed -n '/^get_tile_action_label()/,/^}/p' "$1")
+        hyprctl() {
+            if [ "$1" = "activewindow" ]; then
+                echo '{"class": "org.omarchy.terminal.omaram", "floating": true}'
+            fi
+        }
+        export -f hyprctl
+        export HYPRLAND_INSTANCE_SIGNATURE="mock"
+        get_tile_action_label
+        """
+        res_floating = subprocess.run(["bash", "-c", test_script_floating, "_", str(self.script)], capture_output=True, text=True)
+        self.assertEqual(res_floating.returncode, 0)
+        self.assertEqual(res_floating.stdout.strip(), "tile")
+
 
 class InvestigationDocSecurityTests(unittest.TestCase):
     def setUp(self):

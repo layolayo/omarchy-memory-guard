@@ -15,6 +15,29 @@ ASCII
 # Set standard X11 window title
 printf "\033]0;OMARAM-GUARD\007"
 
+# Determine whether OMARAM is currently floating or tiled to show appropriate navigation hint:
+# When floating -> 'super+t tile'
+# When tiled    -> 'super+t float'
+get_tile_action_label() {
+    if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+        local active_json is_omaram is_floating
+        active_json=$(hyprctl activewindow -j 2>/dev/null || true)
+        is_omaram=$(echo "$active_json" | jq -r '(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") // false' 2>/dev/null || echo "false")
+
+        if [[ "$is_omaram" == "true" ]]; then
+            is_floating=$(echo "$active_json" | jq -r 'if .floating == false then "false" else "true" end' 2>/dev/null || echo "true")
+        else
+            is_floating=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") | if .floating == false then "false" else "true" end' 2>/dev/null | head -1)
+        fi
+
+        if [[ "$is_floating" == "false" ]]; then
+            echo "float"
+            return
+        fi
+    fi
+    echo "tile"
+}
+
 # Auto-tile OMARAM window if it is currently floating so AI diagnosis fits side-by-side
 tile_if_floating() {
     if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
@@ -23,7 +46,7 @@ tile_if_floating() {
         is_omaram=$(echo "$active_json" | jq -r '(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") // false' 2>/dev/null || echo "false")
 
         if [[ "$is_omaram" == "true" ]]; then
-            is_floating=$(echo "$active_json" | jq -r '.floating // false' 2>/dev/null || echo "false")
+            is_floating=$(echo "$active_json" | jq -r 'if .floating == true then "true" else "false" end' 2>/dev/null || echo "false")
             addr=$(echo "$active_json" | jq -r '.address // ""' 2>/dev/null || echo "")
         else
             omaram_client=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "org.omarchy.terminal.omaram" or .title == "OMARAM-GUARD") | "\(.address) \(.floating)"' 2>/dev/null | head -1)
@@ -71,7 +94,8 @@ while true; do
     COLUMNS=$(printf "%s  %8s %10s %7s    %s" "$BBLANK" "PID" "RAM" "MEM %" "APP")
     HEADER_TEXT=$(printf "\n\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
 
-    HELP_LINE=$(printf "\n \n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t tile • esc quit\033[0m")
+    TILE_ACTION=$(get_tile_action_label)
+    HELP_LINE=$(printf "\n \n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t %s • esc quit\033[0m" "$TILE_ACTION")
     FULL_LIST=$(printf "%s%s" "$LIST" "$HELP_LINE")
 
     TARGET=$(echo -e "$FULL_LIST" | gum choose --no-show-help --no-strip-ansi --cursor="ᐅ " --cursor.foreground="196" --selected.foreground="196" --header="$HEADER_TEXT" --height=9)
@@ -130,7 +154,8 @@ while true; do
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
 
-    ACTION_HELP=$(printf "\n \n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t tile • esc back\033[0m")
+    ACTION_TILE_ACTION=$(get_tile_action_label)
+    ACTION_HELP=$(printf "\n \n \n\033[2;38;5;244m←↓↑→ navigate • enter submit • super+t %s • esc back\033[0m" "$ACTION_TILE_ACTION")
     ACTION_LIST=$(printf "%s\n%s\n%s\n%s\n%s%s" \
         "💀 Kill Process" \
         "🔄 Restart Process" \
