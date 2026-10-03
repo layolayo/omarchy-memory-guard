@@ -35,7 +35,7 @@ while true; do
     TARGET=$(echo "$LIST" | gum choose --cursor="ᐅ " --header="$HEADER_TEXT" --height=8)
 
     if [ -z "$TARGET" ]; then
-        exit 0
+        exit 130
     fi
 
     PID=$(echo "$TARGET" | awk '{print $1}')
