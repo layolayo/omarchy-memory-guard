@@ -1,8 +1,6 @@
 #!/bin/bash
 
 # Request snug terminal resize (if supported)
-printf '\033[8;25;60t'
-
 LOGO=$(cat << 'ASCII'
   ██████╗ ███╗   ███╗ █████╗ ██████╗  █████╗ ███╗   ███╗
  ██╔═══██╗████╗ ████║██╔══██╗██╔══██╗██╔══██╗████╗ ████║
@@ -12,16 +10,9 @@ LOGO=$(cat << 'ASCII'
   ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 ASCII
 )
+
 # Set standard X11 window title
 printf "\033]0;OMARAM-GUARD\007"
-
-# Dynamically resize and center the floating window via Omarchy's internal Lua bridge.
-# This ensures perfect marketplace portability without polluting the user's personal hyprland configs!
-if command -v hyprctl >/dev/null 2>&1; then
-    hyprctl eval 'hl.dispatch(hl.dsp.window.resize, "exact 465 425,active")' &>/dev/null
-    hyprctl eval 'hl.dispatch(hl.dsp.window.centerwindow, "")' &>/dev/null
-fi
-
 while true; do
     clear
 
