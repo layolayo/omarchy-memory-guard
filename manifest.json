@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "matthew.memory-guard",
+  "name": "Memory Guard",
+  "version": "1.0.0",
+  "author": "Matthew",
+  "description": "Monitors memory usage and alerts when high",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "MemoryGuard.qml"
+  },
+  "barWidget": {
+    "displayName": "Memory Guard",
+    "description": "Indicates high memory usage",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
