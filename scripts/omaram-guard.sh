@@ -23,14 +23,14 @@ while true; do
     # Memory Stats Box
     # Using awk to cleanly strip 'Mem:' and perfectly align the columns
     MEM_STATS=$(free -h | head -n 2 | awk 'NR==1 {print "Total\tUsed\tFree\tShared\tCache\tAvail"} NR==2 {print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7}' | column -t -s $'\t')
-    MEM_BOX=$(gum style --border rounded --border-foreground 99 --padding "0 2" "$MEM_STATS")
+    MEM_BOX=$(gum style --border rounded --border-foreground 99 --foreground 135 --padding "0 2" "$MEM_STATS")
     gum style --margin "0 6" "$MEM_BOX"
     
     # Process List
     LIST=$(ps -U "$USER" -o pid,rss,pmem,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{printf "%-8s %-10s %-8s %s\n", $1, int($2/1024)" MB", $3"%", $4}')
 
     COLUMNS=$(printf "  %-8s %-10s %-8s %s" "PID" "RAM" "MEM %" "APP")
-    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m\n\033[2mSelect an app to manage (ESC to quit)\033[0m" "$COLUMNS")
+    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[2mSelect an app to manage (ESC to quit)\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
     
     TARGET=$(echo "$LIST" | gum choose --cursor="ᐅ " --header="$HEADER_TEXT" --height=8)
 
