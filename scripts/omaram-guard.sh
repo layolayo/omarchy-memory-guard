@@ -26,13 +26,11 @@ while true; do
     gum style --border rounded --border-foreground 99 --padding "0 2" --margin "0 2" "$MEM_STATS"
     
     # Process List
-    LIST=$(ps -U "$USER" -o pid,rss,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{printf "%-8s %-10s %s\n", $1, int($2/1024)" MB", $3}')
+    LIST=$(ps -U "$USER" -o pid,rss,pmem,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{printf "%-8s %-10s %-8s %s\n", $1, int($2/1024)" MB", $3"%", $4}')
 
-    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[2mSelect an app to manage (ESC to quit)\033[0m")
+    COLUMNS=$(printf "  %-8s %-10s %-8s %s" "PID" "RAM" "MEM %" "APP")
+    HEADER_TEXT=$(printf "\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m\n\033[2mSelect an app to manage (ESC to quit)\033[0m" "$COLUMNS")
     
-    # We use margin to indent the entire gum choose block so it aligns with the logo and box
-    # Oh wait! gum choose doesn't have margin! 
-    # But it is naturally left-aligned, which perfectly matches our margin "0 2" above!
     TARGET=$(echo "$LIST" | gum choose --cursor="ᐅ " --header="$HEADER_TEXT" --height=8)
 
     if [ -z "$TARGET" ]; then
@@ -40,7 +38,7 @@ while true; do
     fi
 
     PID=$(echo "$TARGET" | awk '{print $1}')
-    NAME=$(echo "$TARGET" | awk '{print $4}')
+    NAME=$(echo "$TARGET" | awk '{print $5}')
 
     clear
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
