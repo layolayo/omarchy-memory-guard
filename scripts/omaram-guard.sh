@@ -23,7 +23,8 @@ while true; do
     # Memory Stats Box
     # Using awk to cleanly strip 'Mem:' and perfectly align the columns
     MEM_STATS=$(free -h | head -n 2 | awk 'NR==1 {print "Total\tUsed\tFree\tShared\tCache\tAvail"} NR==2 {print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7}' | column -t -s $'\t')
-    gum style --border rounded --border-foreground 99 --padding "0 2" --margin "0 2" "$MEM_STATS"
+    MEM_BOX=$(gum style --border rounded --border-foreground 99 --padding "0 2" "$MEM_STATS")
+    gum style --margin "0 6" "$MEM_BOX"
     
     # Process List
     LIST=$(ps -U "$USER" -o pid,rss,pmem,comm --sort=-rss | head -n 6 | tail -n 5 | awk '{printf "%-8s %-10s %-8s %s\n", $1, int($2/1024)" MB", $3"%", $4}')
@@ -44,8 +45,9 @@ while true; do
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
     gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
     
-    ACTION_BOX=$(gum style --border normal --border-foreground 212 --padding "1 3" "Selected Process: $NAME (PID $PID)")
-    gum style --margin "1 2" "$ACTION_BOX"
+    # Match the width of MEM_BOX (47 chars) and perfectly center it under the logo
+    ACTION_BOX=$(gum style --border normal --border-foreground 212 --width 45 --align center "Selected Process: $NAME (PID $PID)")
+    gum style --margin "1 6" "$ACTION_BOX"
 
     ACTION_HEADER=$(printf "\033[1;33mSelect Action:\033[0m")
     ACTION=$(gum choose --cursor="ᐅ " --header="$ACTION_HEADER" "💀 Kill Process" "⏸️ Pause (SIGSTOP)" "▶️ Resume (SIGCONT)" "🔙 Back to List")
