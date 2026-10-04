@@ -80,6 +80,154 @@ class ScriptIntegrityTests(unittest.TestCase):
                 first_line = f.readline().strip()
             self.assertEqual(first_line, "#!/bin/bash", f"{script.name} must have #!/bin/bash shebang")
 
+    @staticmethod
+    def _find_invalid_locals(content: str):
+        lines = content.splitlines()
+        in_single_quote = False
+        in_double_quote = False
+        escape = False
+
+        in_func = False
+        func_brace_depth = 0
+        waiting_for_func_brace = False
+        heredoc_delimiter = None
+        invalid_locals = []
+
+        for line_num, line in enumerate(lines, 1):
+            if heredoc_delimiter:
+                if line.strip() == heredoc_delimiter:
+                    heredoc_delimiter = None
+                continue
+
+            i = 0
+            n = len(line)
+            pending_heredoc = None
+
+            while i < n:
+                c = line[i]
+
+                if escape:
+                    escape = False
+                    i += 1
+                    continue
+
+                if c == "\\" and not in_single_quote:
+                    escape = True
+                    i += 1
+                    continue
+
+                if not in_single_quote and not in_double_quote:
+                    if c == "#":
+                        break
+                    if c == "'":
+                        in_single_quote = True
+                        i += 1
+                        continue
+                    if c == '"':
+                        in_double_quote = True
+                        i += 1
+                        continue
+
+                    if c == "<" and i + 1 < n and line[i + 1] == "<":
+                        m_hd = re.match(r"^<<-?\s*['\"]?([a-zA-Z0-9_]+)['\"]?", line[i:])
+                        if m_hd:
+                            pending_heredoc = m_hd.group(1)
+                            i += len(m_hd.group(0))
+                            continue
+
+                    if c == "$" and i + 1 < n and line[i + 1] == "{":
+                        j = i + 2
+                        pe_depth = 1
+                        while j < n and pe_depth > 0:
+                            if line[j] == "{":
+                                pe_depth += 1
+                            elif line[j] == "}":
+                                pe_depth -= 1
+                            j += 1
+                        i = j
+                        continue
+
+                    if waiting_for_func_brace:
+                        if c == "{":
+                            func_brace_depth = 1
+                            waiting_for_func_brace = False
+                            in_func = True
+                            i += 1
+                            continue
+
+                    if in_func:
+                        if c == "{":
+                            func_brace_depth += 1
+                        elif c == "}":
+                            func_brace_depth -= 1
+                            if func_brace_depth == 0:
+                                in_func = False
+                    else:
+                        sub = line[i:]
+                        m_local = re.match(r"^local\b", sub)
+                        if m_local:
+                            prev_char = line[i - 1] if i > 0 else " "
+                            if prev_char in " \t;([{":
+                                invalid_locals.append((line_num, line.strip()))
+
+                    if not in_func and not waiting_for_func_brace:
+                        sub = line[i:]
+                        m_fn1 = re.match(r"^(?:function\s+)?([a-zA-Z0-9_-]+)\s*\(\)\s*\{?", sub)
+                        m_fn2 = re.match(r"^function\s+([a-zA-Z0-9_-]+)\s*\{?", sub)
+                        m_fn = m_fn1 or m_fn2
+                        prev_char = line[i - 1] if i > 0 else " "
+                        if m_fn and prev_char in " \t;":
+                            matched_str = m_fn.group(0)
+                            if "{" in matched_str:
+                                in_func = True
+                                func_brace_depth = 1
+                            else:
+                                waiting_for_func_brace = True
+                            i += len(matched_str)
+                            continue
+                elif in_single_quote:
+                    if c == "'":
+                        in_single_quote = False
+                elif in_double_quote:
+                    if c == '"':
+                        in_double_quote = False
+                    elif c == "$" and i + 1 < n and line[i + 1] == "{":
+                        j = i + 2
+                        pe_depth = 1
+                        while j < n and pe_depth > 0:
+                            if line[j] == "{":
+                                pe_depth += 1
+                            elif line[j] == "}":
+                                pe_depth -= 1
+                            j += 1
+                        i = j
+                        continue
+                i += 1
+
+            if pending_heredoc:
+                heredoc_delimiter = pending_heredoc
+
+        return invalid_locals
+
+    def test_no_local_outside_functions(self):
+        # 1. Assert scanner correctly catches illegal local statements in synthetic snippet
+        bad_sample = "echo start\nlocal bad_var=1\nmy_func() {\n  local ok_var=2\n}\n"
+        detected = self._find_invalid_locals(bad_sample)
+        self.assertEqual(len(detected), 1)
+        self.assertEqual(detected[0][0], 2)
+
+        # 2. Assert all production scripts strictly avoid local outside function scope
+        for script in SCRIPTS_DIR.glob("*.sh"):
+            content = script.read_text(encoding="utf-8")
+            invalid = self._find_invalid_locals(content)
+            self.assertEqual(
+                len(invalid),
+                0,
+                f"Found illegal 'local' declaration outside function scope in {script.name}:\n"
+                + "\n".join(f"  Line {line}: {code}" for line, code in invalid),
+            )
+
+
 
 class CheckMemPctSecurityTests(unittest.TestCase):
     def setUp(self):

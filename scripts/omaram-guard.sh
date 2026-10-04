@@ -808,7 +808,7 @@ while true; do
             # Security verification: Preserve sandbox boundaries and prevent sandbox escape.
             # A confined same-user application without host-execution permissions must not be executed on the host.
             if is_confined_or_sandboxed "$PID"; then
-                local flatpak_app_id=""
+                flatpak_app_id=""
                 if [[ -f "/proc/$PID/root/.flatpak-info" ]]; then
                     flatpak_app_id=$(awk -F= '/^app-id=/ {print $2}' "/proc/$PID/root/.flatpak-info" 2>/dev/null || true)
                 fi
@@ -851,8 +851,8 @@ while true; do
 
             # 5. Prevent interpreter code injection via mutated arguments:
             # If the binary is a shell or interpreter, reject inline execution flags (-c, -e, --eval, --command)
-            local exe_basename="${EXE##*/}"
-            local has_inline_code=0
+            exe_basename="${EXE##*/}"
+            has_inline_code=0
             if [[ "$exe_basename" =~ ^(bash|sh|zsh|dash|python.*|perl|ruby|node|php)$ ]]; then
                 for arg in "${CMD_ARGS[@]:1}"; do
                     if [[ "$arg" == "-c" || "$arg" == "-e" || "$arg" == "--eval" || "$arg" == "--command" ]]; then
@@ -1002,10 +1002,9 @@ while true; do
                 [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
                 show_feedback "46" "☀️ App Nap Disabled: $NAME" "Application running normally" 1.2
             else
-                local win_class=""
+                win_class=""
                 win_class=$(hyprctl clients -j 2>/dev/null | jq -r --argjson p "$PID" '.[] | select(.pid == $p) | .class' 2>/dev/null | head -1 || true)
                 [ -z "$win_class" ] && win_class="$NAME"
-                local member_str
                 member_str=$(IFS=,; echo "${ACTIVE_GROUP_PIDS[*]}")
                 [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" add "$PID" "$win_class" "$member_str" 2>/dev/null || true
                 [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" sync 2>/dev/null || true
@@ -1050,18 +1049,17 @@ while true; do
                         ;;
                     *"30s"*)
                         clear
-                        local snap_tmp
                         snap_tmp=$(mktemp -t omaram-diff-XXXXXX)
                         chmod 600 "$snap_tmp"
 
-                        local diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
+                        diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
                         if [ ! -x "$diff_script" ]; then
                             show_feedback "196" "❌ Profiler Missing" "Cannot find omaram-diff-profile.sh" 2
                             rm -f "$snap_tmp"
                             continue
                         fi
 
-                        local prof_code=0
+                        prof_code=0
                         "$diff_script" "$PID" --duration 30 --output "$snap_tmp" --progress || prof_code=$?
 
                         if [ "$prof_code" -eq 130 ]; then
@@ -1083,18 +1081,17 @@ while true; do
                         ;;
                     *"10s"*)
                         clear
-                        local snap_tmp
                         snap_tmp=$(mktemp -t omaram-diff-XXXXXX)
                         chmod 600 "$snap_tmp"
 
-                        local diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
+                        diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
                         if [ ! -x "$diff_script" ]; then
                             show_feedback "196" "❌ Profiler Missing" "Cannot find omaram-diff-profile.sh" 2
                             rm -f "$snap_tmp"
                             continue
                         fi
 
-                        local prof_code=0
+                        prof_code=0
                         "$diff_script" "$PID" --duration 10 --output "$snap_tmp" --progress || prof_code=$?
 
                         if [ "$prof_code" -eq 130 ]; then
