@@ -92,6 +92,21 @@ fi
 # 1. Freeze process immediately to halt memory allocation and preserve state
 kill -STOP "$pid" 2>/dev/null || true
 
+if [[ "$report_only" -eq 0 ]]; then
+  AI_DIAG_REGISTRY="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/ai_diagnose.registry"
+  mkdir -p "$(dirname "$AI_DIAG_REGISTRY")"
+  if ! grep -qw "$pid" "$AI_DIAG_REGISTRY" 2>/dev/null; then
+    echo "$pid" >> "$AI_DIAG_REGISTRY"
+  fi
+
+  cleanup_ai_diag() {
+    if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+      sed -i "/^${pid}$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_ai_diag EXIT INT TERM
+fi
+
 # 2. Gather process facts
 comm=$(cat "/proc/$pid/comm" 2>/dev/null || echo "unknown")
 # Strip directory components if prctl set a custom path-like name, matching omarchy-crash-watch
@@ -229,7 +244,7 @@ tile_if_floating() {
           (.initialClass == "org.omarchy.terminal.omaram") or
           ((.title // "") | contains("OMARAM"))
         )
-      ) | .address' 2>/dev/null | head -1)
+      ) | .address' 2>/dev/null | head -1 || true)
 
     if [[ -n "$omaram_addr" ]]; then
       hyprctl dispatch "hl.dsp.window.float({ window = '\''address:'\'' .. omaram_addr, action = '\''off'\'' })" >/dev/null 2>&1 || true
@@ -252,7 +267,7 @@ tile_if_floating
 
 # 4. Launch the default Omarchy agent in an interactive floating TUI
 if [[ "$inline" -eq 1 ]]; then
-  exec omarchy-agent --inline --prompt "$prompt"
+  omarchy-agent --inline --prompt "$prompt"
 else
-  exec omarchy-agent --prompt "$prompt"
+  omarchy-agent --prompt "$prompt"
 fi

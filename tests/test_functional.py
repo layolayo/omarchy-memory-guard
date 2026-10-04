@@ -610,6 +610,63 @@ class AppNapEngineFunctionalTests(unittest.TestCase):
         finally:
             nap_temp.unlink(missing_ok=True)
 
+    def test_awk_tagging_with_ai_diagnose(self):
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
+        start_quote = guard_content.rfind("'", 0, guard_content.find("BEGIN {", awk_start))
+        end_quote = guard_content.find("' | sort -k2", start_quote)
+        awk_code = guard_content[start_quote+1:end_quote]
+
+        nap_temp = Path("/tmp/test_nap_reg_ai.txt")
+        ai_temp = Path("/tmp/test_ai_reg.txt")
+
+        # 1000: in AI diagnosis and paused (T) -> 🤖
+        # 2000: in App Nap AND AI diagnosis, paused (T) -> 🤖 (AI attention takes precedence over 💤)
+        # 3000: in App Nap only and paused (T) -> 💤
+        # 4000: NOT in AI or Nap, and paused (T) -> ⏸️
+        # 5000: in App Nap and running (S) -> ☀️
+        # 6000: in AI diagnosis but running (S) -> no pause icon
+        # 7000: regular running app (S) -> no tag
+        nap_temp.write_text("2000:napapp1:2000\n3000:napapp2:3000\n5000:napapp3:5000\n")
+        ai_temp.write_text("1000\n2000\n6000\n")
+
+        sample_input = """\
+1000 500 500000 5.0 T aidebugapp
+2000 500 400000 4.0 T napapp1
+3000 500 300000 3.0 T napapp2
+4000 500 200000 2.0 T normalpaused
+5000 500 150000 1.5 S napapp3
+6000 500 120000 1.2 S airunning
+7000 500 100000 1.0 S normalrunning
+"""
+        try:
+            res = subprocess.run(
+                ["awk", "-v", "self=8888", "-v", "parent=9999", "-v", "now=1000", "-v", "vel_file=", f"-v", f"nap_file={nap_temp}", f"-v", f"ai_file={ai_temp}", awk_code],
+                input=sample_input,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            lines = res.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 7)
+
+            # Check tags
+            self.assertIn("🤖", lines[0])  # AI diagnosed and paused
+            self.assertIn("🤖", lines[1])  # Napping and AI diagnosed -> 🤖 takes precedence
+            self.assertNotIn("💤", lines[1])
+            self.assertIn("💤", lines[2])  # Napping only and paused
+            self.assertIn("⏸️", lines[3])  # Plain paused
+            self.assertIn("☀️", lines[4])  # Napping and awake/running
+            self.assertNotIn("🤖", lines[5])  # AI registered but running -> no robot icon
+            self.assertNotIn("⏸️", lines[5])
+            self.assertNotIn("🤖", lines[6])  # Normal running
+            self.assertNotIn("💤", lines[6])
+            self.assertNotIn("☀️", lines[6])
+            self.assertNotIn("⏸️", lines[6])
+        finally:
+            nap_temp.unlink(missing_ok=True)
+            ai_temp.unlink(missing_ok=True)
+
 
 class AIDifferentialProfilerFunctionalTests(unittest.TestCase):
     def setUp(self):
@@ -721,6 +778,43 @@ time.sleep(2)
             if snap_file.exists():
                 snap_file.unlink()
 
+    def test_diagnose_ai_registry_lifecycle(self):
+        p = subprocess.Popen(["sleep", "10"])
+        with tempfile.TemporaryDirectory() as tmp_xdg:
+            env = os.environ.copy()
+            env["XDG_RUNTIME_DIR"] = tmp_xdg
+            reg_file = Path(tmp_xdg) / "omaram" / "ai_diagnose.registry"
+
+            mock_bin = Path(tmp_xdg) / "bin"
+            mock_bin.mkdir(parents=True, exist_ok=True)
+            mock_agent = mock_bin / "omarchy-agent"
+            mock_agent.write_text(f"""#!/bin/bash
+if [[ -f "$XDG_RUNTIME_DIR/omaram/ai_diagnose.registry" ]] && grep -qw "{p.pid}" "$XDG_RUNTIME_DIR/omaram/ai_diagnose.registry" 2>/dev/null; then
+    exit 0
+else
+    exit 42
+fi
+""")
+            mock_agent.chmod(0o755)
+
+            try:
+                env["PATH"] = f"{mock_bin}:{env.get('PATH', '')}"
+                res = subprocess.run(
+                    [str(self.diagnose_script), str(p.pid)],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+                self.assertEqual(res.returncode, 0, f"omaram-diagnose should succeed with code 0, stderr: {res.stderr}")
+
+                # After omaram-diagnose exits, PID must be cleaned up from registry
+                if reg_file.exists():
+                    self.assertNotIn(str(p.pid), reg_file.read_text())
+            finally:
+                p.kill()
+                p.wait()
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -145,6 +145,8 @@ FLOAT_CHANGED_FLAG=$(mktemp -t omaram-float-XXXXXX 2>/dev/null || echo "/tmp/oma
 HYPR_EVENT_FLAG=$(mktemp -t omaram-event-XXXXXX 2>/dev/null || echo "/tmp/omaram-event-$$.flag")
 CURRENT_TTY=$(tty 2>/dev/null || true)
 CURRENT_TTY_NAME="${CURRENT_TTY#/dev/}"
+NAP_REGISTRY_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/nap.registry"
+AI_DIAG_REGISTRY="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/ai_diagnose.registry"
 
 watch_floating_state() {
     local last_state
@@ -256,38 +258,65 @@ omaram_choose() {
                 is_nap=1
             fi
 
+            local is_ai=0
+            if [[ -f "$AI_DIAG_REGISTRY" ]] && grep -qw "$pid" "$AI_DIAG_REGISTRY" 2>/dev/null; then
+                is_ai=1
+            fi
+
             local is_paused=0
             local state
             state=$(awk '/^State:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "S")
             [[ "$state" =~ ^T ]] && is_paused=1
 
-            if [ "$is_paused" -eq 0 ] && [ "$is_nap" -eq 1 ]; then
-                local reg_line
-                reg_line=$(grep "^${pid}:" "$NAP_REGISTRY_FILE" 2>/dev/null || true)
-                if [ -n "$reg_line" ]; then
-                    local _rpid _rclass _rmems
-                    IFS=':' read -r _rpid _rclass _rmems <<< "$reg_line"
-                    IFS=',' read -r -a _marray <<< "${_rmems:-$pid}"
-                    for _mp in "${_marray[@]}"; do
-                        local _st
-                        _st=$(awk '/^State:/ {print $2}' "/proc/$_mp/status" 2>/dev/null || echo "S")
-                        if [[ "$_st" =~ ^T ]]; then
-                            is_paused=1
-                            break
-                        fi
-                    done
+            if [ "$is_paused" -eq 0 ]; then
+                if [ "$is_nap" -eq 1 ]; then
+                    local reg_line
+                    reg_line=$(grep "^${pid}:" "$NAP_REGISTRY_FILE" 2>/dev/null || true)
+                    if [ -n "$reg_line" ]; then
+                        local _rpid _rclass _rmems
+                        IFS=':' read -r _rpid _rclass _rmems <<< "$reg_line"
+                        IFS=',' read -r -a _marray <<< "${_rmems:-$pid}"
+                        for _mp in "${_marray[@]}"; do
+                            local _st
+                            _st=$(awk '/^State:/ {print $2}' "/proc/$_mp/status" 2>/dev/null || echo "S")
+                            if [[ "$_st" =~ ^T ]]; then
+                                is_paused=1
+                                break
+                            fi
+                        done
+                    fi
+                fi
+                if [ "$is_paused" -eq 0 ] && [ "$is_ai" -eq 1 ]; then
+                    if [[ -n "${GROUP_MEMBERS_MAP[$pid]:-}" ]]; then
+                        IFS=',' read -r -a _marray <<< "${GROUP_MEMBERS_MAP[$pid]}"
+                        for _mp in "${_marray[@]}"; do
+                            local _st
+                            _st=$(awk '/^State:/ {print $2}' "/proc/$_mp/status" 2>/dev/null || echo "S")
+                            if [[ "$_st" =~ ^T ]]; then
+                                is_paused=1
+                                break
+                            fi
+                        done
+                    fi
                 fi
             fi
 
             local new_tag
-            if [ "$is_nap" -eq 1 ]; then
-                new_tag=$([ "$is_paused" -eq 1 ] && echo "💤" || echo "☀️")
+            if [ "$is_paused" -eq 1 ]; then
+                if [ "$is_ai" -eq 1 ]; then
+                    new_tag="🤖"
+                elif [ "$is_nap" -eq 1 ]; then
+                    new_tag="💤"
+                else
+                    new_tag="⏸️"
+                fi
             else
-                new_tag=$([ "$is_paused" -eq 1 ] && echo "⏸️" || echo "  ")
+                new_tag=$([ "$is_nap" -eq 1 ] && echo "☀️" || echo "  ")
             fi
 
             local cur_tag="  "
-            if [[ "$row" =~ 💤$ ]]; then cur_tag="💤"
+            if [[ "$row" =~ 🤖$ ]]; then cur_tag="🤖"
+            elif [[ "$row" =~ 💤$ ]]; then cur_tag="💤"
             elif [[ "$row" =~ ☀️$ ]]; then cur_tag="☀️"
             elif [[ "$row" =~ ⏸️$ ]]; then cur_tag="⏸️"
             fi
@@ -369,7 +398,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VELOCITY_CACHE=$(mktemp -t omaram-vel-XXXXXX 2>/dev/null || echo "/tmp/omaram-vel-$$.cache")
 CLIENT_MAP_CACHE=$(mktemp -t omaram-clients-XXXXXX 2>/dev/null || echo "/tmp/omaram-clients-$$.cache")
 NAP_REGISTRY_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/nap.registry"
+AI_DIAG_REGISTRY="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/ai_diagnose.registry"
 NAP_SCRIPT="$SCRIPT_DIR/omaram-nap-watcher.sh"
+
+# Clean up any stale PIDs in AI diagnosis registry that no longer exist
+if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+    while IFS= read -r _r_pid; do
+        if [[ -n "$_r_pid" && "$_r_pid" =~ ^[0-9]+$ ]] && [[ ! -d "/proc/$_r_pid" ]]; then
+            sed -i "/^${_r_pid}$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+        fi
+    done < "$AI_DIAG_REGISTRY"
+fi
 
 show_feedback() {
     local color="$1"
@@ -422,7 +461,7 @@ while true; do
     hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.pid > 0 and .class != "") | "\(.pid):\(.class)"' > "$CLIENT_MAP_CACHE" 2>/dev/null || true
 
     # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees with velocity trends
-    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" -v client_file="$CLIENT_MAP_CACHE" '
+    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" -v ai_file="$AI_DIAG_REGISTRY" -v client_file="$CLIENT_MAP_CACHE" '
         BEGIN {
             ignore["omaram"] = 1; ignore["omaram-guard"] = 1; ignore["gum"] = 1;
             ignore["bash"] = 1; ignore["ps"] = 1; ignore["xdg-terminal-exec"] = 1;
@@ -444,6 +483,13 @@ while true; do
                     if (na[1] != "") nap_pids[na[1]] = 1;
                 }
                 close(nap_file);
+            }
+            if (ai_file != "") {
+                while ((getline aline < ai_file) > 0) {
+                    split(aline, aa, ":");
+                    if (aa[1] != "") ai_pids[aa[1]] = 1;
+                }
+                close(ai_file);
             }
             if (client_file != "") {
                 while ((getline cline < client_file) > 0) {
@@ -497,6 +543,7 @@ while true; do
                 group_pmem[r] += P_pmem[p]
                 group_members[r] = (group_members[r] == "" ? p : group_members[r] "," p)
                 if (P_state[p] ~ /^T/) group_state[r] = "T"
+                if (p in ai_pids) group_ai[r] = 1
             }
             for (g = 1; g <= num_groups; g++) {
                 r = group_list[g]
@@ -512,10 +559,16 @@ while true; do
                 }
 
                 # Status tag: Minimal icons without words
-                if (r in nap_pids) {
-                    tag = (group_state[r] ~ /^T/ ? "💤" : "☀️")
+                if (group_state[r] ~ /^T/) {
+                    if (r in ai_pids || group_ai[r] == 1) {
+                        tag = "🤖"
+                    } else if (r in nap_pids) {
+                        tag = "💤"
+                    } else {
+                        tag = "⏸️"
+                    }
                 } else {
-                    tag = (group_state[r] ~ /^T/ ? "⏸️" : "  ")
+                    tag = (r in nap_pids ? "☀️" : "  ")
                 }
 
                 trend = "\033[38;5;244m→\033[0m"
@@ -645,27 +698,53 @@ while true; do
     gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
     
     # Process Header Details: Selected process with True Reclaim (USS) and PSS
+    IS_AI_DIAGNOSED=0
+    if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+        if grep -qw "$PID" "$AI_DIAG_REGISTRY" 2>/dev/null; then
+            IS_AI_DIAGNOSED=1
+        else
+            for gp in "${ACTIVE_GROUP_PIDS[@]}"; do
+                if grep -qw "$gp" "$AI_DIAG_REGISTRY" 2>/dev/null; then
+                    IS_AI_DIAGNOSED=1
+                    break
+                fi
+            done
+        fi
+    fi
+
     HEADER_DETAILS="Selected: $NAME (PID $PID)"
     IS_NAPPING=0
     if [[ -f "$NAP_REGISTRY_FILE" ]] && grep -q "^${PID}:" "$NAP_REGISTRY_FILE" 2>/dev/null; then
         IS_NAPPING=1
+        NAP_ACTION="☀️ Disable App Nap"
+    else
+        NAP_ACTION="💤 Enable App Nap"
+    fi
+
+    if [ "$IS_AI_DIAGNOSED" -eq 1 ] && [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
+        HEADER_DETAILS+=" 🤖"
+    elif [ "$IS_NAPPING" -eq 1 ]; then
         if [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
             HEADER_DETAILS+=" 💤"
         else
             HEADER_DETAILS+=" ☀️"
         fi
-        NAP_ACTION="☀️ Disable App Nap"
-    else
-        NAP_ACTION="💤 Enable App Nap"
+    elif [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
+        HEADER_DETAILS+=" ⏸️"
     fi
+
     if [ "$USS_MB" -gt 0 ]; then
         HEADER_DETAILS=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$HEADER_DETAILS" "$USS_MB" "$PSS_MB")
     fi
     gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "0 10" "$HEADER_DETAILS"
 
     AI_ACTION="🤖 Diagnose with AI"
-    if [ "$PROC_STATE" = "T" ]; then
-        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
+    if [ "$PROC_STATE" = "T" ] || [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
+        if [ "$IS_AI_DIAGNOSED" -eq 1 ]; then
+            ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: AI DIAGNOSIS 🤖)\033[0m:")
+        else
+            ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
+        fi
         TOGGLE_ACTION="▶️ Resume (SIGCONT)"
     else
         ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
@@ -701,12 +780,18 @@ while true; do
 
     case "$ACTION" in
         *"Kill"*)
+            if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+                sed -i -E "/^($PID|$(IFS='|'; echo "${ACTIVE_GROUP_PIDS[*]}"))$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+            fi
             [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             show_feedback "196" "💀 Killed $NAME" "All associated processes terminated"
             ;;
         *"Restart"*)
+            if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+                sed -i -E "/^($PID|$(IFS='|'; echo "${ACTIVE_GROUP_PIDS[*]}"))$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+            fi
             [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
             # Security verification: Preserve sandbox boundaries and prevent sandbox escape.
             # A confined same-user application without host-execution permissions must not be executed on the host.
@@ -788,7 +873,13 @@ while true; do
                         c_rss_mb=$(( c_rss_kb / 1024 ))
                         c_state=$(awk '/^State:/ {print $2}' "/proc/$cpid/status" 2>/dev/null || echo "S")
                         c_tag=""
-                        [[ "$c_state" =~ ^T ]] && c_tag=" ⏸️"
+                        if [[ "$c_state" =~ ^T ]]; then
+                            if [[ -f "$AI_DIAG_REGISTRY" ]] && (grep -qw "$cpid" "$AI_DIAG_REGISTRY" 2>/dev/null || grep -qw "$PID" "$AI_DIAG_REGISTRY" 2>/dev/null); then
+                                c_tag=" 🤖"
+                            else
+                                c_tag=" ⏸️"
+                            fi
+                        fi
                         c_role="child"
                         [[ "$cpid" == "$PID" ]] && c_role="root"
 
@@ -870,6 +961,9 @@ while true; do
 
                 case "$CP_ACTION" in
                     *"Kill"*)
+                        if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+                            sed -i "/^${SELECTED_CPID}$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+                        fi
                         kill -9 "$SELECTED_CPID" 2>/dev/null || true
                         show_feedback "196" "💀 Terminated Child PID $SELECTED_CPID" "Child process terminated" 1.2
                         ;;
@@ -878,6 +972,9 @@ while true; do
                         show_feedback "220" "⏸️ Paused Child PID $SELECTED_CPID" "Child execution suspended (SIGSTOP)" 1.2
                         ;;
                     *"Resume"*)
+                        if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+                            sed -i "/^${SELECTED_CPID}$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+                        fi
                         kill -CONT "$SELECTED_CPID" 2>/dev/null || true
                         show_feedback "46" "▶️ Resumed Child PID $SELECTED_CPID" "Child execution resumed (SIGCONT)" 1.2
                         ;;
@@ -929,6 +1026,8 @@ while true; do
 
                 case "$DIAG_MODE" in
                     *"Instant"*)
+                        mkdir -p "$(dirname "$AI_DIAG_REGISTRY")"
+                        echo "$PID" >> "$AI_DIAG_REGISTRY"
                         tile_if_floating
                         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
                         "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" >/dev/null 2>&1 &
@@ -961,6 +1060,8 @@ while true; do
                             continue
                         fi
 
+                        mkdir -p "$(dirname "$AI_DIAG_REGISTRY")"
+                        echo "$PID" >> "$AI_DIAG_REGISTRY"
                         tile_if_floating
                         "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" --snapshot-file "$snap_tmp" >/dev/null 2>&1 &
                         show_feedback "51" "📸 Differential AI Attached" "Process paused & 30s diff loaded" 2.5
@@ -992,6 +1093,8 @@ while true; do
                             continue
                         fi
 
+                        mkdir -p "$(dirname "$AI_DIAG_REGISTRY")"
+                        echo "$PID" >> "$AI_DIAG_REGISTRY"
                         tile_if_floating
                         "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" --snapshot-file "$snap_tmp" >/dev/null 2>&1 &
                         show_feedback "51" "📸 Differential AI Attached" "Process paused & 10s diff loaded" 2.5
@@ -1009,6 +1112,9 @@ while true; do
             show_feedback "220" "⏸️ Paused $NAME" "Execution suspended (SIGSTOP)" 1.5
             ;;
         *"Resume"*)
+            if [[ -f "$AI_DIAG_REGISTRY" ]]; then
+                sed -i -E "/^($PID|$(IFS='|'; echo "${ACTIVE_GROUP_PIDS[*]}"))$/d" "$AI_DIAG_REGISTRY" 2>/dev/null || true
+            fi
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -CONT "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             show_feedback "46" "▶️ Resumed $NAME" "Execution resumed (SIGCONT)" 1.5
