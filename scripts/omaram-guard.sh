@@ -222,20 +222,70 @@ while true; do
     # Logo is 56 chars. Subtitle is 39 chars. Margin of 10 perfectly centers it under the logo (2 + 8).
     gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
 
-    # Memory Stats Box
-    # Using awk to cleanly strip 'Mem:' and perfectly align the columns
-    MEM_STATS=$(free -h | head -n 2 | awk 'NR==1 {print "Total\tUsed\tFree\tShared\tCache\tAvail"} NR==2 {print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7}' | sed 's/Gi/G/g; s/Mi/M/g' | column -t -s $'\t' -R 1,2,3,4,5,6)
+    # Memory Stats Box with Linux PSI (Pressure Stall Information)
+    PSI_VAL=$(awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}' /proc/pressure/memory 2>/dev/null || echo "N/A")
+    MEM_STATS=$(free -h | head -n 2 | awk -v psi="${PSI_VAL:-N/A}" '
+        NR==1 {print "Total\tUsed\tFree\tShared\tCache\tAvail\tPSI"}
+        NR==2 {print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"psi}
+    ' | sed 's/Gi/G/g; s/Mi/M/g' | column -t -s $'\t' -R 1,2,3,4,5,6,7)
     MEM_STATS=$(echo "$MEM_STATS" | sed $'s/.*/\033[38;5;135m&\033[0m/')
-    MEM_BOX=$(gum style --border rounded --padding "0 2" "$MEM_STATS")
+    MEM_BOX=$(gum style --border rounded --padding "0 1" "$MEM_STATS")
     MEM_BOX=$(echo "$MEM_BOX" | sed $'s/.*/\033[38;5;135m&\033[0m/')
-    gum style --margin "0 7" "$MEM_BOX"
+    gum style --margin "0 4" "$MEM_BOX"
     
-    # Process List: Strictly filter by UID, exclude self, parent, and terminal wrappers
-    LIST=$(ps -u "$UID" --no-headers -o pid,rss,pmem,state,comm --sort=-rss 2>/dev/null | awk -v self="$$" -v parent="$PPID" '
-        $1 != self && $1 != parent && $5 !~ /^(omaram|gum|bash|ps|xdg-terminal)/ {
-            tag = ($4 ~ /^T/ ? " ⏸️ PAUSED" : "");
-            printf "%8s %7s MB %6s%%    %s%s\n", $1, int($2/1024), $3, $5, tag
-        }' | head -n 5)
+    # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees
+    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" '
+        BEGIN {
+            ignore["omaram"] = 1; ignore["omaram-guard"] = 1; ignore["gum"] = 1;
+            ignore["bash"] = 1; ignore["ps"] = 1; ignore["xdg-terminal-exec"] = 1;
+        }
+        {
+            pid = $1; ppid = $2; rss = $3; pmem = $4; state = $5; comm = $6;
+            if (pid == self || pid == parent || comm in ignore) next;
+
+            P_pid[pid] = pid
+            P_ppid[pid] = ppid
+            P_rss[pid] = rss
+            P_pmem[pid] = pmem
+            P_state[pid] = state
+            P_comm[pid] = comm
+            all_pids[++num_pids] = pid
+        }
+        function find_group_root(p, c) {
+            curr = p
+            while ((curr in P_ppid) && (P_ppid[curr] in P_comm) && P_comm[P_ppid[curr]] == c) {
+                curr = P_ppid[curr]
+            }
+            return curr
+        }
+        END {
+            for (i = 1; i <= num_pids; i++) {
+                p = all_pids[i]
+                c = P_comm[p]
+                r = find_group_root(p, c)
+                if (!(r in group_pids)) {
+                    group_list[++num_groups] = r
+                    group_pids[r] = 1
+                    group_comm[r] = c
+                    group_count[r] = 0
+                    group_rss[r] = 0
+                    group_pmem[r] = 0
+                    group_state[r] = "S"
+                }
+                group_count[r] += 1
+                group_rss[r] += P_rss[p]
+                group_pmem[r] += P_pmem[p]
+                if (P_state[p] ~ /^T/) group_state[r] = "T"
+            }
+            for (g = 1; g <= num_groups; g++) {
+                r = group_list[g]
+                cnt = group_count[r]
+                comm = group_comm[r]
+                label = (cnt > 1) ? comm " (" cnt " procs)" : comm
+                tag = (group_state[r] ~ /^T/ ? " ⏸️ PAUSED" : "")
+                printf "%8s %7d MB %6.1f%%    %s%s\n", r, int(group_rss[r]/1024), group_pmem[r], label, tag
+            }
+        }' | sort -k2 -n -r | head -n 5)
 
     mapfile -t PROC_LIST < <(printf "%s" "$LIST" | grep -v '^[[:space:]]*$')
 
@@ -286,12 +336,29 @@ while true; do
     NAME=$(printf '%s' "$NAME" | tr -cd '[:print:]')
     [ -z "$NAME" ] && NAME="process"
 
+    # Extract USS (Private_Clean + Private_Dirty) and PSS for True Reclaim metric
+    USS_KB=0
+    PSS_KB=0
+    if [[ -r "/proc/$PID/smaps_rollup" ]]; then
+        read -r USS_KB PSS_KB < <(awk '
+            /^Private_(Clean|Dirty):/ {uss += $2}
+            /^Pss:/ {pss += $2}
+            END {print (uss ? uss : 0), (pss ? pss : 0)}
+        ' "/proc/$PID/smaps_rollup" 2>/dev/null || echo "0 0")
+    fi
+    USS_MB=$(( USS_KB / 1024 ))
+    PSS_MB=$(( PSS_KB / 1024 ))
+
     clear
     gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
     gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
     
-    # Match the width of MEM_BOX (45 chars) and perfectly center it under the logo
-    gum style --border normal --border-foreground 196 --foreground 196 --width 43 --align center --margin "1 7" "Selected Process: $NAME (PID $PID)"
+    # Process Header Details: Selected process with True Reclaim (USS) and PSS
+    HEADER_DETAILS="Selected: $NAME (PID $PID)"
+    if [ "$USS_MB" -gt 0 ]; then
+        HEADER_DETAILS+=$'\n'"True Reclaim (USS): ${USS_MB} MB • PSS: ${PSS_MB} MB"
+    fi
+    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "1 5" "$HEADER_DETAILS"
 
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
@@ -321,7 +388,8 @@ while true; do
 
     case "$ACTION" in
         *"Kill"*)
-            kill -9 "$PID" 2>/dev/null || true
+            mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
+            kill -9 "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
             gum style --foreground 196 --margin "1 2" "💀 Killed $NAME."
             sleep 1.5
             ;;
@@ -391,7 +459,8 @@ while true; do
                 continue
             fi
 
-            kill -9 "$PID" 2>/dev/null || true
+            mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
+            kill -9 "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
             sleep 0.5
             (cd "$CWD" && "${CMD_ARGS[@]}" </dev/null >/dev/null 2>&1 & disown)
             gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME cleanly."
@@ -405,12 +474,14 @@ while true; do
             sleep 2.5
             ;;
         *"Pause"*)
-            kill -STOP "$PID" 2>/dev/null || true
+            mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
+            kill -STOP "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
             gum style --foreground 220 --margin "1 2" "⏸️ Paused $NAME. Execution suspended."
             sleep 2
             ;;
         *"Resume"*)
-            kill -CONT "$PID" 2>/dev/null || true
+            mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
+            kill -CONT "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
             gum style --foreground 46 --margin "1 2" "▶️ Resumed $NAME."
             sleep 1.5
             ;;

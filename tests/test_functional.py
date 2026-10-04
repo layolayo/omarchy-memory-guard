@@ -264,6 +264,56 @@ class ProcessTableParsingTests(unittest.TestCase):
         self.assertIn("ide-worker", lines[1])
         self.assertIn("⏸️ PAUSED", lines[1])
 
+    def test_process_tree_aggregation(self):
+        # Extract the AWK aggregation script directly from omaram-guard.sh
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self=\"$$\" -v parent=\"$PPID\" '")
+        start_quote = guard_content.find("'", awk_start)
+        end_quote = guard_content.find("' | sort -k2", start_quote)
+        awk_code = guard_content[start_quote+1:end_quote]
+
+        # Multi-process trees:
+        # Chromium tree: root 1000, children 1001 (ppid 1000), 1002 (ppid 1001), 1003 (ppid 1000)
+        # Code tree: root 2000, child 2001 (ppid 2000)
+        # Single app: easyeffects 3000 (ppid 500)
+        sample_input = """\
+1000 500 204800 2.0 S chromium
+1001 1000 307200 3.0 S chromium
+1002 1001 512000 5.0 S chromium
+1003 1000 409600 4.0 S chromium
+2000 500 307200 3.0 S code
+2001 2000 204800 2.0 S code
+3000 500 102400 1.0 S easyeffects
+9998 500 50000 0.5 S bash
+9999 500 50000 0.5 S gum
+"""
+        res = subprocess.run(
+            ["awk", "-v", "self=8888", "-v", "parent=9999", awk_code],
+            input=sample_input,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = res.stdout.strip().splitlines()
+        # Should have 3 grouped entries: chromium, code, easyeffects
+        self.assertEqual(len(lines), 3)
+
+        # Chromium: 200+300+500+400 = 1400 MB (4 procs)
+        self.assertIn("1000", lines[0])
+        self.assertIn("1400 MB", lines[0])
+        self.assertIn("chromium (4 procs)", lines[0])
+
+        # Code: 300+200 = 500 MB (2 procs)
+        self.assertIn("2000", lines[1])
+        self.assertIn("500 MB", lines[1])
+        self.assertIn("code (2 procs)", lines[1])
+
+        # Easyeffects: 100 MB (1 proc -> no suffix)
+        self.assertIn("3000", lines[2])
+        self.assertIn("100 MB", lines[2])
+        self.assertIn("easyeffects", lines[2])
+        self.assertNotIn("(1 procs)", lines[2])
+
 
 class TUIEngineFunctionalTests(unittest.TestCase):
     def setUp(self):
@@ -357,6 +407,57 @@ class QMLWidgetThresholdTests(unittest.TestCase):
     def test_poll_frequency(self):
         # 5 second polling interval
         self.assertIn("interval: 5000", self.qml)
+
+
+class TrueReclaimMetricTests(unittest.TestCase):
+    def test_uss_and_pss_extraction(self):
+        smaps_content = """\
+Rss:              429484 kB
+Pss:              302419 kB
+Private_Clean:     92304 kB
+Private_Dirty:    189204 kB
+Shared_Clean:     143120 kB
+Shared_Dirty:       4856 kB
+"""
+        awk_cmd = """
+        awk '
+            /^Private_(Clean|Dirty):/ {uss += $2}
+            /^Pss:/ {pss += $2}
+            END {print (uss ? uss : 0), (pss ? pss : 0)}
+        '
+        """
+        res = subprocess.run(["bash", "-c", awk_cmd], input=smaps_content, capture_output=True, text=True, check=True)
+        uss_kb, pss_kb = res.stdout.strip().split()
+        uss_mb = int(uss_kb) // 1024
+        pss_mb = int(pss_kb) // 1024
+
+        # 92304 + 189204 = 281508 kB -> 274 MB
+        self.assertEqual(uss_mb, 274)
+        # 302419 kB -> 295 MB
+        self.assertEqual(pss_mb, 295)
+
+
+class LinuxPSIMetricTests(unittest.TestCase):
+    def test_psi_extraction(self):
+        psi_content = """\
+some avg10=4.25 avg60=1.10 avg300=0.50 total=128492
+full avg10=2.10 avg60=0.40 avg300=0.10 total=48102
+"""
+        awk_cmd = """
+        awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}'
+        """
+        res = subprocess.run(["bash", "-c", awk_cmd], input=psi_content, capture_output=True, text=True, check=True)
+        self.assertEqual(res.stdout.strip(), "4.25%")
+
+    def test_psi_zero_handling(self):
+        psi_content = """\
+some avg10=0.00 avg60=0.00 avg300=0.00 total=100
+"""
+        awk_cmd = """
+        awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}'
+        """
+        res = subprocess.run(["bash", "-c", awk_cmd], input=psi_content, capture_output=True, text=True, check=True)
+        self.assertEqual(res.stdout.strip(), "0.00%")
 
 
 if __name__ == "__main__":
