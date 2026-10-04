@@ -114,9 +114,6 @@ comm=${comm##*/}
 [[ -n $comm && $comm != "-" && $comm != "." && $comm != ".." ]] || comm="unknown"
 comm=$(printf '%s' "$comm" | tr -cd '[:print:]')
 
-exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || echo "unknown")
-exe=$(printf '%s' "$exe" | tr -cd '[:print:]')
-
 cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || echo "$comm")
 
 # Sanitize and redact inline credentials (passwords, tokens, API keys, basic auth URLs)
@@ -134,9 +131,6 @@ clean_cmdline=$(printf '%s' "$cmdline" | sed -E \
 
 # Sanitize strings to strip binary control characters
 clean_cmdline=$(printf '%s' "$clean_cmdline" | tr -cd '[:print:]\t\n')
-
-cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || echo "unknown")
-cwd=$(printf '%s' "$cwd" | tr -cd '[:print:]')
 
 ppid=$(awk '/PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "1")
 parent_comm=$(cat "/proc/$ppid/comm" 2>/dev/null || echo "unknown")
@@ -171,9 +165,7 @@ Target Process:
   PID:         $pid
   Process:     $comm
   Parent:      $parent_comm (PID $ppid)
-  Binary:      $exe
   Command:     $clean_cmdline
-  Working Dir: $cwd
   Memory RSS:  $rss_mb MB (~$pmem% of system RAM)
   Memory PSS:  $pss_mb MB
   Swap Used:   $swap_mb MB
@@ -206,7 +198,7 @@ Follow the Omarchy memory investigation guide:
   $docs
 
 Key objectives:
-1. Establish evidence: Read /proc/$pid/status and /proc/$pid/smaps_rollup to analyze whether this is private dirty heap (leak/active data) vs shared/file-backed cache.
+1. Establish facts & evidence: Read /proc/$pid/status and /proc/$pid/smaps_rollup to analyze whether this is private dirty heap (leak/active data) vs shared/file-backed cache. Inspect /proc/$pid/cwd and /proc/$pid/exe in-session if binary or working directory context is required.
 2. In-flight work & data safety: Inspect open file descriptors in /proc/$pid/fd/ to determine if unsaved files, database writes, or active sockets would be damaged by termination.
 3. Check journalctl _PID=$pid --since "15 minutes ago" --no-pager for error bursts or GC failure cycles.
 4. Report & Next-Steps Action Menu:

@@ -309,6 +309,17 @@ class DiagnoseSecurityTests(unittest.TestCase):
         self.assertIn("${comm##*/}", content)
         self.assertIn("${parent_comm##*/}", content)
 
+    def test_protected_paths_not_in_prompt(self):
+        # Protected executable (/proc/$pid/exe) and working directory (/proc/$pid/cwd)
+        # must NOT be interpolated into public command-line arguments to prevent exposing
+        # private paths on default procfs.
+        content = self.script.read_text()
+        self.assertNotIn("Binary:      $exe", content)
+        self.assertNotIn("Working Dir: $cwd", content)
+        self.assertNotIn('exe=$(readlink -f "/proc/$pid/exe"', content)
+        self.assertNotIn('cwd=$(readlink -f "/proc/$pid/cwd"', content)
+
+
 
 class AIDifferentialProfilerSecurityTests(unittest.TestCase):
     def setUp(self):

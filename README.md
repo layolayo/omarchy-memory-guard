@@ -73,6 +73,7 @@ When triggering **Diagnose with AI**, command-line arguments are sanitized throu
 
 ### 5. Privacy Invariants for AI Diagnostics
 OMARAM Guard provides the diagnostic agent with system facts while maintaining strict data protection invariants:
+- **No Protected Path Leaks in Public Arguments:** Binary (`/proc/$PID/exe`) and working directory (`/proc/$PID/cwd`) paths are never interpolated into prompt arguments passed to `omarchy-agent`. This prevents private executable and workspace directories from being exposed to other local Unix users via `/proc/*/cmdline` or process tables on standard procfs configurations. The AI agent inspects them directly in-session as the authenticated process owner.
 - **No Environment Token Leaks:** The agent is explicitly prohibited from reading `/proc/$PID/environ`, which frequently stores decrypted secrets, tokens, and SSH keys.
 - **No Raw Memory Dumping:** Banned from reading or dumping `/proc/$PID/mem`.
 - **Metadata-Only File Inspection:** Symlinks under `/proc/$PID/fd/` are inspected solely for file paths, locks, and network sockets; reading private user documents (`.txt`, `.pdf`, `.json`) is forbidden.

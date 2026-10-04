@@ -798,6 +798,8 @@ time.sleep(3)
             self.assertIn("Target Process:", out)
             self.assertIn("Differential Memory Snapshot Profile", out)
             self.assertIn("Privacy Invariants:", out)
+            self.assertNotIn("Binary:", out)
+            self.assertNotIn("Working Dir:", out)
         finally:
             p.kill()
             p.wait()
@@ -822,6 +824,29 @@ time.sleep(3)
             p.wait()
             if snap_file.exists():
                 snap_file.unlink()
+
+    def test_diagnose_prompt_excludes_private_working_directory_and_executable_path(self):
+        # Spawning process inside a dedicated private directory with restrictive permissions
+        with tempfile.TemporaryDirectory(prefix="omaram_private_workspace_") as private_dir:
+            p = subprocess.Popen(["sleep", "10"], cwd=private_dir)
+            try:
+                res = subprocess.run(
+                    [str(self.diagnose_script), str(p.pid), "--report-only"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(res.returncode, 0)
+                out = res.stdout
+
+                # Target Process header should be present
+                self.assertIn("Target Process:", out)
+                # Protected fields and private directory path must NOT appear in output prompt
+                self.assertNotIn("Binary:", out)
+                self.assertNotIn("Working Dir:", out)
+                self.assertNotIn(private_dir, out)
+            finally:
+                p.kill()
+                p.wait()
 
     def test_diagnose_ai_registry_lifecycle(self):
         p = subprocess.Popen(["sleep", "10"])
