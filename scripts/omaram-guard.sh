@@ -194,6 +194,72 @@ omaram_choose() {
         printf "\r\033[K%*s%b" "$_fpad" "" "$_footer"
     }
 
+    _update_nap_icons() {
+        local i row pid changed=0
+        local nap_pids=""
+        if [ -f "$NAP_REGISTRY_FILE" ]; then
+            nap_pids=$(cut -d: -f1 "$NAP_REGISTRY_FILE" 2>/dev/null || true)
+        fi
+
+        for ((i=0; i<_num; i++)); do
+            row="${_items[$i]}"
+            pid=$(echo "$row" | awk '{print $1}')
+            [[ "$pid" =~ ^[0-9]+$ ]] || continue
+
+            local is_nap=0
+            if [[ -n "$nap_pids" ]] && grep -qw "$pid" <<< "$nap_pids"; then
+                is_nap=1
+            fi
+
+            local is_paused=0
+            local state
+            state=$(awk '/^State:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "S")
+            [[ "$state" =~ ^T ]] && is_paused=1
+
+            if [ "$is_paused" -eq 0 ] && [ "$is_nap" -eq 1 ]; then
+                local reg_line
+                reg_line=$(grep "^${pid}:" "$NAP_REGISTRY_FILE" 2>/dev/null || true)
+                if [ -n "$reg_line" ]; then
+                    local _rpid _rclass _rmems
+                    IFS=':' read -r _rpid _rclass _rmems <<< "$reg_line"
+                    IFS=',' read -r -a _marray <<< "${_rmems:-$pid}"
+                    for _mp in "${_marray[@]}"; do
+                        local _st
+                        _st=$(awk '/^State:/ {print $2}' "/proc/$_mp/status" 2>/dev/null || echo "S")
+                        if [[ "$_st" =~ ^T ]]; then
+                            is_paused=1
+                            break
+                        fi
+                    done
+                fi
+            fi
+
+            local new_tag
+            if [ "$is_nap" -eq 1 ]; then
+                new_tag=$([ "$is_paused" -eq 1 ] && echo "💤" || echo "☀️")
+            else
+                new_tag=$([ "$is_paused" -eq 1 ] && echo "⏸️" || echo "  ")
+            fi
+
+            local cur_tag="  "
+            if [[ "$row" =~ 💤$ ]]; then cur_tag="💤"
+            elif [[ "$row" =~ ☀️$ ]]; then cur_tag="☀️"
+            elif [[ "$row" =~ ⏸️$ ]]; then cur_tag="⏸️"
+            fi
+
+            if [ "$cur_tag" != "$new_tag" ]; then
+                local stripped="${row%${cur_tag}}"
+                _items[$i]="${stripped}${new_tag}"
+                changed=1
+            fi
+        done
+
+        if [ "$changed" -eq 1 ]; then
+            printf "\033[%dA" "$((_num + 1))"
+            _draw
+        fi
+    }
+
     _draw
 
     while true; do
@@ -210,9 +276,7 @@ omaram_choose() {
             fi
             if [ "$_listen_events" -eq 1 ] && [ -f "$HYPR_EVENT_FLAG" ]; then
                 rm -f "$HYPR_EVENT_FLAG"
-                printf "\033[?25h"
-                LAST_SELECTED_INDEX="$_selected"
-                return 200
+                _update_nap_icons
             fi
             continue
         elif [ "$status" -ne 0 ]; then
@@ -452,11 +516,7 @@ while true; do
     NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
 
     TARGET=""
-    omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 "${LAST_SELECTED_INDEX:-0}" 1
-    CHOOSE_STATUS=$?
-    if [ "$CHOOSE_STATUS" -eq 200 ]; then
-        continue
-    elif [ "$CHOOSE_STATUS" -ne 0 ]; then
+    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 0 1; then
         exit 130
     fi
 
@@ -503,105 +563,97 @@ while true; do
     NAME=$(printf '%s' "$NAME" | tr -cd '[:print:]')
     [ -z "$NAME" ] && NAME="process"
 
-    ACTION_SEL_INDEX=0
-    while true; do
-        # Extract USS (Private_Clean + Private_Dirty) and PSS for True Reclaim metric
-        USS_KB=0
-        PSS_KB=0
-        if [[ -r "/proc/$PID/smaps_rollup" ]]; then
-            read -r USS_KB PSS_KB < <(awk '
-                /^Private_(Clean|Dirty):/ {uss += $2}
-                /^Pss:/ {pss += $2}
-                END {print (uss ? uss : 0), (pss ? pss : 0)}
-            ' "/proc/$PID/smaps_rollup" 2>/dev/null || echo "0 0")
-        fi
-        USS_MB=$(( USS_KB / 1024 ))
-        PSS_MB=$(( PSS_KB / 1024 ))
+    # Extract USS (Private_Clean + Private_Dirty) and PSS for True Reclaim metric
+    USS_KB=0
+    PSS_KB=0
+    if [[ -r "/proc/$PID/smaps_rollup" ]]; then
+        read -r USS_KB PSS_KB < <(awk '
+            /^Private_(Clean|Dirty):/ {uss += $2}
+            /^Pss:/ {pss += $2}
+            END {print (uss ? uss : 0), (pss ? pss : 0)}
+        ' "/proc/$PID/smaps_rollup" 2>/dev/null || echo "0 0")
+    fi
+    USS_MB=$(( USS_KB / 1024 ))
+    PSS_MB=$(( PSS_KB / 1024 ))
 
-        IFS=',' read -r -a GROUP_PIDS_ARRAY <<< "${GROUP_MEMBERS_MAP[$PID]:-$PID}"
-        ACTIVE_GROUP_PIDS=()
-        for gp in "${GROUP_PIDS_ARRAY[@]}"; do
-            [[ -d "/proc/$gp" ]] && ACTIVE_GROUP_PIDS+=("$gp")
-        done
-        GROUP_COUNT=${#ACTIVE_GROUP_PIDS[@]}
-        [ "$GROUP_COUNT" -eq 0 ] && GROUP_COUNT=1
+    IFS=',' read -r -a GROUP_PIDS_ARRAY <<< "${GROUP_MEMBERS_MAP[$PID]:-$PID}"
+    ACTIVE_GROUP_PIDS=()
+    for gp in "${GROUP_PIDS_ARRAY[@]}"; do
+        [[ -d "/proc/$gp" ]] && ACTIVE_GROUP_PIDS+=("$gp")
+    done
+    GROUP_COUNT=${#ACTIVE_GROUP_PIDS[@]}
+    [ "$GROUP_COUNT" -eq 0 ] && GROUP_COUNT=1
 
-        PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
-        GROUP_HAS_PAUSED=0
-        [[ "$PROC_STATE" =~ ^T ]] && GROUP_HAS_PAUSED=1
-        for gp in "${ACTIVE_GROUP_PIDS[@]}"; do
-            gp_state=$(awk '/^State:/ {print $2}' "/proc/$gp/status" 2>/dev/null || echo "S")
-            if [[ "$gp_state" =~ ^T ]]; then
-                GROUP_HAS_PAUSED=1
-                break
-            fi
-        done
-
-        clear
-        gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
-        gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
-        
-        # Process Header Details: Selected process with True Reclaim (USS) and PSS
-        HEADER_DETAILS="Selected: $NAME (PID $PID)"
-        IS_NAPPING=0
-        if [[ -f "$NAP_REGISTRY_FILE" ]] && grep -q "^${PID}:" "$NAP_REGISTRY_FILE" 2>/dev/null; then
-            IS_NAPPING=1
-            if [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
-                HEADER_DETAILS+=" 💤"
-            else
-                HEADER_DETAILS+=" ☀️"
-            fi
-            NAP_ACTION="☀️ Disable App Nap"
-        else
-            NAP_ACTION="💤 Enable App Nap"
-        fi
-        if [ "$USS_MB" -gt 0 ]; then
-            HEADER_DETAILS=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$HEADER_DETAILS" "$USS_MB" "$PSS_MB")
-        fi
-        gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "0 10" "$HEADER_DETAILS"
-
-        if [ "$PROC_STATE" = "T" ]; then
-            ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
-            TOGGLE_ACTION="▶️ Resume (SIGCONT)"
-            AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
-        else
-            ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
-            TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
-            AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
-        fi
-
-        if [ "$GROUP_COUNT" -gt 1 ]; then
-            ACTION_ITEMS=(
-                "💀 Kill Entire App ($GROUP_COUNT procs)"
-                "🔄 Restart Entire App"
-                "$NAP_ACTION"
-                "$TOGGLE_ACTION"
-                "🔍 Inspect Child Tabs ($GROUP_COUNT procs)"
-                "$AI_ACTION"
-                "🔙 Back to List"
-            )
-        else
-            ACTION_ITEMS=(
-                "💀 Kill Process"
-                "🔄 Restart Process"
-                "$NAP_ACTION"
-                "$TOGGLE_ACTION"
-                "$AI_ACTION"
-                "🔙 Back to List"
-            )
-        fi
-        ACTION_NAV="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m"
-
-        ACTION=""
-        omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION "196" 10 "${ACTION_SEL_INDEX:-0}" 1
-        ACTION_STATUS=$?
-        if [ "$ACTION_STATUS" -eq 200 ]; then
-            ACTION_SEL_INDEX="$LAST_SELECTED_INDEX"
-            continue
-        elif [ "$ACTION_STATUS" -ne 0 ]; then
+    PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
+    GROUP_HAS_PAUSED=0
+    [[ "$PROC_STATE" =~ ^T ]] && GROUP_HAS_PAUSED=1
+    for gp in "${ACTIVE_GROUP_PIDS[@]}"; do
+        gp_state=$(awk '/^State:/ {print $2}' "/proc/$gp/status" 2>/dev/null || echo "S")
+        if [[ "$gp_state" =~ ^T ]]; then
+            GROUP_HAS_PAUSED=1
             break
         fi
-        ACTION_SEL_INDEX=0
+    done
+
+    clear
+    gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+    gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
+    
+    # Process Header Details: Selected process with True Reclaim (USS) and PSS
+    HEADER_DETAILS="Selected: $NAME (PID $PID)"
+    IS_NAPPING=0
+    if [[ -f "$NAP_REGISTRY_FILE" ]] && grep -q "^${PID}:" "$NAP_REGISTRY_FILE" 2>/dev/null; then
+        IS_NAPPING=1
+        if [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
+            HEADER_DETAILS+=" 💤"
+        else
+            HEADER_DETAILS+=" ☀️"
+        fi
+        NAP_ACTION="☀️ Disable App Nap"
+    else
+        NAP_ACTION="💤 Enable App Nap"
+    fi
+    if [ "$USS_MB" -gt 0 ]; then
+        HEADER_DETAILS=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$HEADER_DETAILS" "$USS_MB" "$PSS_MB")
+    fi
+    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "0 10" "$HEADER_DETAILS"
+
+    if [ "$PROC_STATE" = "T" ]; then
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
+        TOGGLE_ACTION="▶️ Resume (SIGCONT)"
+        AI_ACTION="🤖 Diagnose with AI (Inspect Paused)"
+    else
+        ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
+        TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
+        AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
+    fi
+
+    if [ "$GROUP_COUNT" -gt 1 ]; then
+        ACTION_ITEMS=(
+            "💀 Kill Entire App ($GROUP_COUNT procs)"
+            "🔄 Restart Entire App"
+            "$NAP_ACTION"
+            "$TOGGLE_ACTION"
+            "🔍 Inspect Child Tabs ($GROUP_COUNT procs)"
+            "$AI_ACTION"
+            "🔙 Back to List"
+        )
+    else
+        ACTION_ITEMS=(
+            "💀 Kill Process"
+            "🔄 Restart Process"
+            "$NAP_ACTION"
+            "$TOGGLE_ACTION"
+            "$AI_ACTION"
+            "🔙 Back to List"
+        )
+    fi
+    ACTION_NAV="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m"
+
+    ACTION=""
+    if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION "196" 10; then
+        continue
+    fi
 
     case "$ACTION" in
         *"Kill"*)
@@ -822,9 +874,7 @@ while true; do
             show_feedback "46" "▶️ Resumed $NAME" "Execution resumed (SIGCONT)" 1.5
             ;;
         *)
-            break
+            continue
             ;;
     esac
-    break
-done
 done
