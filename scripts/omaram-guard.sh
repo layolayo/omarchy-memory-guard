@@ -127,6 +127,7 @@ omaram_choose() {
     local _footer_fmt="$3"
     local _out_var="$4"
     local _color="${5:-196}"
+    local _indent="${6:-0}"
     local _selected=0
     local _num=${#_items[@]}
     local ESC=$'\e'
@@ -135,21 +136,37 @@ omaram_choose() {
     printf "\033[?25l"
     trap 'printf "\033[?25h"' RETURN INT TERM
 
-    [ -n "$_header" ] && printf "%s\n" "$_header"
+    if [ -n "$_header" ]; then
+        if [ "$_indent" -gt 0 ]; then
+            while IFS= read -r hline; do
+                printf "%*s%b\n" "$_indent" "" "$hline"
+            done <<< "$_header"
+        else
+            printf "%s\n" "$_header"
+        fi
+    fi
 
     _draw() {
         local i _lbl _footer
+        local _pad_str=""
+        if [ "$_indent" -gt 0 ]; then
+            printf -v _pad_str "%*s" "$_indent" ""
+        fi
         for ((i=0; i<_num; i++)); do
             if [ "$i" -eq "$_selected" ]; then
-                printf "\r\033[K \033[38;5;%smᐅ %s\033[0m\n" "$_color" "${_items[$i]}"
+                printf "\r\033[K%s \033[38;5;%smᐅ %s\033[0m\n" "$_pad_str" "$_color" "${_items[$i]}"
             else
-                printf "\r\033[K   %s\n" "${_items[$i]}"
+                printf "\r\033[K%s   %s\n" "$_pad_str" "${_items[$i]}"
             fi
         done
         printf "\r\033[K\n"
         _lbl=$(get_tile_action_label)
         printf -v _footer "$_footer_fmt" "$_lbl"
-        printf "\r\033[K %s" "$_footer"
+        local _stripped _fpad
+        _stripped=$(printf "%b" "$_footer" | sed -E "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+        _fpad=$(( (64 - ${#_stripped}) / 2 ))
+        [ "$_fpad" -lt 0 ] && _fpad=0
+        printf "\r\033[K%*s%b" "$_fpad" "" "$_footer"
     }
 
     _draw
@@ -488,7 +505,7 @@ while true; do
     ACTION_NAV="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m"
 
     ACTION=""
-    if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION "196"; then
+    if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION "196" 10; then
         continue
     fi
 
@@ -629,7 +646,7 @@ while true; do
                 CHILD_CHOICES+=("🔙 Back to App Menu")
 
                 SELECTED_CHILD=""
-                if ! omaram_choose CHILD_CHOICES "$CHILD_HEADER" "$CHILD_NAV" SELECTED_CHILD "51"; then
+                if ! omaram_choose CHILD_CHOICES "$CHILD_HEADER" "$CHILD_NAV" SELECTED_CHILD "51" 4; then
                     break
                 fi
 
@@ -657,7 +674,7 @@ while true; do
                 )
 
                 CP_ACTION=""
-                if ! omaram_choose CP_ACTIONS "$CP_ACTION_HEADER" "$CHILD_NAV" CP_ACTION "196"; then
+                if ! omaram_choose CP_ACTIONS "$CP_ACTION_HEADER" "$CHILD_NAV" CP_ACTION "196" 10; then
                     continue
                 fi
 
