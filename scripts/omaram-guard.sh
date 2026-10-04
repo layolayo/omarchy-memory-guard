@@ -661,7 +661,13 @@ while true; do
     NAME=$(printf '%s' "$NAME" | tr -cd '[:print:]')
     [ -z "$NAME" ] && NAME="process"
 
-    # Extract USS (Private_Clean + Private_Dirty) and PSS for True Reclaim metric
+    # Action menu loop for the selected process
+    while true; do
+        if [[ ! -d "/proc/$PID" ]]; then
+            break
+        fi
+
+        # Extract USS (Private_Clean + Private_Dirty) and PSS for True Reclaim metric
     USS_KB=0
     PSS_KB=0
     if [[ -r "/proc/$PID/smaps_rollup" ]]; then
@@ -775,6 +781,11 @@ while true; do
 
     ACTION=""
     if ! omaram_choose ACTION_ITEMS "$ACTION_HEADER" "$ACTION_NAV" ACTION "196" 10; then
+        break
+    fi
+
+    if [ -f "$FLOAT_CHANGED_FLAG" ]; then
+        rm -f "$FLOAT_CHANGED_FLAG"
         continue
     fi
 
@@ -787,6 +798,7 @@ while true; do
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             show_feedback "196" "💀 Killed $NAME" "All associated processes terminated"
+            break
             ;;
         *"Restart"*)
             if [[ -f "$AI_DIAG_REGISTRY" ]]; then
@@ -807,6 +819,7 @@ while true; do
                     sleep 0.5
                     (cd "$HOME" && flatpak run "$flatpak_app_id" </dev/null >/dev/null 2>&1 & disown)
                     show_feedback "46" "🔄 Restarted $NAME" "Via Flatpak sandbox launcher"
+                    break
                 else
                     # For all other confined processes (containers, namespaces, bwrap, custom sandboxes),
                     # skip host restart to preserve the sandbox boundary and prevent host code execution.
@@ -859,6 +872,7 @@ while true; do
             sleep 0.5
             (cd "$CWD" && "${CMD_ARGS[@]}" </dev/null >/dev/null 2>&1 & disown)
             show_feedback "46" "🔄 Restarted $NAME cleanly" "Fresh instance launched" 1.5
+            break
             ;;
         *"Inspect"*)
             while true; do
@@ -1119,8 +1133,13 @@ while true; do
             kill -CONT "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             show_feedback "46" "▶️ Resumed $NAME" "Execution resumed (SIGCONT)" 1.5
             ;;
+        *"Back"*|"")
+            break
+            ;;
         *)
-            continue
+            break
             ;;
     esac
 done
+done
+
