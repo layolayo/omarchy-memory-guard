@@ -4,7 +4,54 @@
 
 set -euo pipefail
 
-pid=${1:?usage: omaram-diagnose <pid>}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+pid=""
+diff_seconds=""
+snapshot_file=""
+report_only=0
+inline=0
+
+# Parse options & PID
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --diff|-d)
+      if [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]]; then
+        diff_seconds="$2"
+        shift 2
+      else
+        diff_seconds=30
+        shift
+      fi
+      ;;
+    --snapshot-file|-s)
+      snapshot_file="${2:?--snapshot-file requires a file path}"
+      shift 2
+      ;;
+    --report-only|-r)
+      report_only=1
+      shift
+      ;;
+    --inline|-i)
+      inline=1
+      shift
+      ;;
+    *)
+      if [[ -z "$pid" ]]; then
+        pid="$1"
+        shift
+      else
+        echo "Unexpected argument: $1" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+if [[ -z "$pid" ]]; then
+  echo "usage: omaram-diagnose <pid> [--diff [seconds]] [--snapshot-file <path>] [--report-only]" >&2
+  exit 1
+fi
 
 # Validate PID: must be positive numeric integer > 1 and not current/parent process
 if [[ ! $pid =~ ^[0-9]+$ ]] || (( pid <= 1 )) || (( pid == $$ )) || (( pid == PPID )); then
@@ -22,6 +69,24 @@ owner=$(stat -c '%u' "/proc/$pid" 2>/dev/null || true)
 if [[ "$owner" != "$UID" ]]; then
   echo "Refusing to inspect process $pid (not owned by current user)." >&2
   exit 1
+fi
+
+# Optional: Run Differential Profiling if requested
+snapshot_content=""
+if [[ -n "$diff_seconds" ]]; then
+  diff_tmp=$(mktemp -t omaram-diff-XXXXXX)
+  chmod 600 "$diff_tmp"
+  trap 'rm -f "$diff_tmp"' EXIT
+  if [[ "$report_only" -eq 1 || ! -t 1 ]]; then
+    "$SCRIPT_DIR/omaram-diff-profile.sh" "$pid" --duration "$diff_seconds" --output "$diff_tmp" --quiet
+  else
+    "$SCRIPT_DIR/omaram-diff-profile.sh" "$pid" --duration "$diff_seconds" --output "$diff_tmp" --progress
+  fi
+  snapshot_content=$(cat "$diff_tmp" 2>/dev/null || true)
+  rm -f "$diff_tmp"
+elif [[ -n "$snapshot_file" && -f "$snapshot_file" ]]; then
+  snapshot_content=$(cat "$snapshot_file" 2>/dev/null || true)
+  rm -f "$snapshot_file" # Ephemeral file cleanup
 fi
 
 # 1. Freeze process immediately to halt memory allocation and preserve state
@@ -76,7 +141,6 @@ pss_mb=$((pss_kb / 1024))
 total_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "1")
 pmem=$((rss_kb * 100 / (total_kb > 0 ? total_kb : 1)))
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 docs="$SCRIPT_DIR/../docs/INVESTIGATION.md"
 if [[ ! -f "$docs" ]]; then
   docs="$HOME/.config/omarchy/plugins/io.github.layolayo.memory-guard/docs/INVESTIGATION.md"
@@ -100,6 +164,20 @@ Target Process:
   Swap Used:   $swap_mb MB
   Threads:     $threads
   State:       PAUSED (SIGSTOP)
+PROMPT
+)
+
+if [[ -n "$snapshot_content" ]]; then
+  prompt+=$(cat <<DIFF_BLOCK
+
+
+$snapshot_content
+DIFF_BLOCK
+)
+fi
+
+prompt+=$(cat <<PROMPT_TAIL
+
 
 Privacy Invariants:
 - NEVER read /proc/$pid/environ (contains sensitive environment tokens and secrets).
@@ -126,8 +204,18 @@ Key objectives:
      [3] ▶️ Resume: Run \`kill -CONT $pid\` if memory consumption was legitimate or user needs to save open work.
      [4] 🎯 Targeted Reclaim: If this is a child renderer tab, worker, or sub-process, pinpoint the specific tab or task to close to preserve the main application.
    - Diagnostic discipline: Diagnosis reads; it does not destroy, unpause, or mutate without explicit confirmation. Present findings first and wait for the user to confirm before running a destructive signal or restart. Leave the system as you found it.
-PROMPT
+PROMPT_TAIL
 )
 
+# If report-only requested, print prompt and exit
+if [[ "$report_only" -eq 1 ]]; then
+  printf "%s\n" "$prompt"
+  exit 0
+fi
+
 # 4. Launch the default Omarchy agent in an interactive floating TUI
-exec omarchy-agent --prompt "$prompt"
+if [[ "$inline" -eq 1 ]]; then
+  exec omarchy-agent --inline --prompt "$prompt"
+else
+  exec omarchy-agent --prompt "$prompt"
+fi

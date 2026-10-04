@@ -37,6 +37,12 @@ Read `/proc/<pid>/smaps_rollup` and `/proc/<pid>/status`:
 - **Shared / File-backed (mmap):** Shared libraries or files mapped into memory (e.g. video assets, font caches, databases). The Linux kernel can reclaim or page out clean file-backed memory if needed.
 - **Swap Usage (`VmSwap`):** If swap is heavily utilized, the process has already pushed other applications out of physical RAM and is risking disk I/O thrashing.
 
+### Step 2.5: Differential Profiling (Snapshot & Rate-of-Change Analysis)
+When a process is profiled with the 30-Second Differential Profiler (`omaram-diff-profile.sh` or `omaram-diagnose.sh --diff`):
+- **Unique Set Size ($\Delta \text{USS}$):** Focus on changes in private dirty memory. If USS expands continuously (>5 MB and allocation velocity >15 MB/min), this proves an ongoing runaway heap leak rather than a steady-state footprint.
+- **File Descriptors & Sockets ($\Delta \text{FD}$):** If network sockets increment without corresponding drops, identify unclosed connections, HTTP client keep-alive leaks, or connection pool exhaustion.
+- **Thread Count ($\Delta \text{Threads}$):** Leaps in thread counts indicate unjoined threads or goroutine leaks.
+
 ### Step 3: Inspect In-Flight Work & File Handles
 Inspect `/proc/<pid>/fd/`:
 - **Open Documents / Files:** Look for file descriptors pointing to documents, databases, git repositories, or video/audio streams.

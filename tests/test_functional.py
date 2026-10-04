@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -608,6 +609,117 @@ class AppNapEngineFunctionalTests(unittest.TestCase):
             self.assertNotIn("⏸️", lines[3])
         finally:
             nap_temp.unlink(missing_ok=True)
+
+
+class AIDifferentialProfilerFunctionalTests(unittest.TestCase):
+    def setUp(self):
+        self.diff_script = SCRIPTS_DIR / "omaram-diff-profile.sh"
+        self.diagnose_script = SCRIPTS_DIR / "omaram-diagnose.sh"
+
+    def test_parameter_validation(self):
+        # Invalid PIDs
+        for bad_pid in ["", "abc", "-5", "0", "1", "999999999"]:
+            res = subprocess.run([str(self.diff_script), bad_pid], capture_output=True, text=True)
+            self.assertNotEqual(res.returncode, 0)
+
+        # Invalid durations
+        p = subprocess.Popen(["sleep", "10"])
+        try:
+            for bad_dur in ["0", "-1", "abc", "500"]:
+                res = subprocess.run([str(self.diff_script), str(p.pid), "--duration", bad_dur], capture_output=True, text=True)
+                self.assertNotEqual(res.returncode, 0)
+        finally:
+            p.kill()
+            p.wait()
+
+    def test_differential_snapshot_on_stable_process(self):
+        p = subprocess.Popen(["sleep", "10"])
+        try:
+            res = subprocess.run(
+                [str(self.diff_script), str(p.pid), "--duration", "1", "--quiet"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            out = res.stdout
+            self.assertIn("### 📸 1-Second Differential Memory Snapshot Profile", out)
+            self.assertIn("Diagnostic Verdict:", out)
+            self.assertIn("STABLE FOOTPRINT", out)
+            self.assertIn("Unique Set (USS)", out)
+            self.assertIn("Proportional (PSS)", out)
+            self.assertIn("Resident Set (RSS)", out)
+            self.assertIn("Total Descriptors:", out)
+        finally:
+            p.kill()
+            p.wait()
+
+    def test_differential_snapshot_heap_growth_and_socket_detection(self):
+        code = """
+import time, socket
+mem = []
+socks = []
+for i in range(2):
+    time.sleep(0.5)
+    mem.append(b"x" * (12 * 1024 * 1024))
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    socks.append(s)
+time.sleep(2)
+"""
+        p = subprocess.Popen(["python3", "-c", code])
+        try:
+            time.sleep(0.3)
+            res = subprocess.run(
+                [str(self.diff_script), str(p.pid), "--duration", "2", "--quiet"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            out = res.stdout
+            self.assertIn("ACTIVE RUNAWAY HEAP LEAK", out)
+            self.assertIn("Unique Set (USS)", out)
+            self.assertIn("Network Sockets:", out)
+            self.assertIn("socket:[", out)
+        finally:
+            p.kill()
+            p.wait()
+
+    def test_diagnose_integration_with_diff(self):
+        p = subprocess.Popen(["sleep", "10"])
+        try:
+            res = subprocess.run(
+                [str(self.diagnose_script), str(p.pid), "--diff", "1", "--report-only"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            out = res.stdout
+            self.assertIn("Target Process:", out)
+            self.assertIn("Differential Memory Snapshot Profile", out)
+            self.assertIn("Privacy Invariants:", out)
+        finally:
+            p.kill()
+            p.wait()
+
+    def test_diagnose_integration_with_snapshot_file(self):
+        p = subprocess.Popen(["sleep", "10"])
+        snap_file = Path(tempfile.gettempdir()) / f"omaram_test_snap_{os.getpid()}.md"
+        snap_file.write_text("### 📸 Custom Pre-Captured Snapshot Delta Data\n- Verdict: LEAK")
+        try:
+            res = subprocess.run(
+                [str(self.diagnose_script), str(p.pid), "--snapshot-file", str(snap_file), "--report-only"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            out = res.stdout
+            self.assertIn("Custom Pre-Captured Snapshot Delta Data", out)
+            # Ephemeral file hygiene: file must be cleaned up
+            self.assertFalse(snap_file.exists())
+        finally:
+            p.kill()
+            p.wait()
+            if snap_file.exists():
+                snap_file.unlink()
 
 
 if __name__ == "__main__":

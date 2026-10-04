@@ -162,6 +162,31 @@ class DiagnoseSecurityTests(unittest.TestCase):
         self.assertIn("${parent_comm##*/}", content)
 
 
+class AIDifferentialProfilerSecurityTests(unittest.TestCase):
+    def setUp(self):
+        self.script = SCRIPTS_DIR / "omaram-diff-profile.sh"
+        self.content = self.script.read_text()
+
+    def test_pid_validation_present(self):
+        self.assertIn('[[ ! "$PID" =~ ^[0-9]+$ ]]', self.content)
+        self.assertIn('(( PID <= 1 ))', self.content)
+        self.assertIn('(( PID == $$ ))', self.content)
+        self.assertIn('(( PID == PPID ))', self.content)
+
+    def test_process_ownership_checked(self):
+        self.assertIn('stat -c \'%u\' "/proc/$PID"', self.content)
+        self.assertIn('"$OWNER" != "$UID"', self.content)
+
+    def test_privacy_invariants(self):
+        self.assertNotIn('/proc/$PID/environ', self.content)
+        self.assertNotIn('/proc/$target_pid/environ', self.content)
+        self.assertNotIn('/proc/$PID/mem', self.content)
+        self.assertNotIn('/proc/$target_pid/mem', self.content)
+
+    def test_prctl_basename_sanitization(self):
+        self.assertIn("${COMM##*/}", self.content)
+
+
 class GuardSecurityTests(unittest.TestCase):
     def setUp(self):
         self.script = SCRIPTS_DIR / "omaram-guard.sh"
