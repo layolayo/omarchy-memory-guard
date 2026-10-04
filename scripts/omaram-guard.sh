@@ -129,11 +129,9 @@ omaram_choose() {
     local _color="${5:-196}"
     local _indent="${6:-0}"
     local _initial_sel="${7:-0}"
-    local _allow_refresh="${8:-0}"
     local _selected="$_initial_sel"
     local _num=${#_items[@]}
     local ESC=$'\e'
-    local _idle_ticks=0
     [ "$_num" -eq 0 ] && return 1
 
     [ "$_selected" -ge "$_num" ] && _selected=0
@@ -189,23 +187,12 @@ omaram_choose() {
                 printf "\033[%dA" "$((_num + 1))"
                 _draw
             fi
-            if [ "$_allow_refresh" -eq 1 ]; then
-                _idle_ticks=$(( _idle_ticks + 1 ))
-                # 15 ticks * 0.15s = ~2.2 seconds of idle time
-                if [ "$_idle_ticks" -ge 15 ]; then
-                    printf "\033[?25h"
-                    LAST_SELECTED_INDEX="$_selected"
-                    return 200
-                fi
-            fi
             continue
         elif [ "$status" -ne 0 ]; then
             # EOF or read error (e.g. terminal disconnected or piped input closed)
             printf "\033[?25h"
             return 130
         fi
-
-        _idle_ticks=0
 
         if [[ "$key" == "$ESC" ]]; then
             local rest=""
@@ -418,11 +405,7 @@ while true; do
     NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
 
     TARGET=""
-    omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 "${LAST_SELECTED_INDEX:-0}" 1
-    CHOOSE_STATUS=$?
-    if [ "$CHOOSE_STATUS" -eq 200 ]; then
-        continue
-    elif [ "$CHOOSE_STATUS" -ne 0 ]; then
+    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208"; then
         exit 130
     fi
 

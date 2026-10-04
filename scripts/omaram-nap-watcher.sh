@@ -142,6 +142,25 @@ cmd_sync() {
     active_pid=$(hyprctl activewindow -j 2>/dev/null | jq -r '.pid // empty' 2>/dev/null || true)
     active_class=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' 2>/dev/null || true)
 
+    # If OMARAM itself is the active window, do not suspend any registered apps!
+    # Inspecting apps in OMARAM should never freeze the inspected app.
+    if [[ "$active_class" == "org.omarchy.terminal.omaram" ]]; then
+        return 0
+    fi
+
+    # Query active workspaces across all connected monitors
+    local active_workspaces=""
+    active_workspaces=$(hyprctl monitors -j 2>/dev/null | jq -r '.[].activeWorkspace.id' 2>/dev/null || true)
+
+    # Query all clients currently visible on any active monitor
+    local visible_clients=""
+    if [ -n "$active_workspaces" ]; then
+        visible_clients=$(hyprctl clients -j 2>/dev/null | jq -r --arg ws "$active_workspaces" '
+            ($ws | split("\n") | map(select(length > 0) | tonumber)) as $aws |
+            .[] | select(.workspace.id as $wid | $aws | index($wid)) | "\(.pid):\(.class)"
+        ' 2>/dev/null || true)
+    fi
+
     local line r_pid r_class r_members
     while IFS=':' read -r r_pid r_class r_members; do
         [[ -n "$r_pid" ]] || continue
@@ -154,22 +173,33 @@ cmd_sync() {
 
         IFS=',' read -r -a mem_array <<< "${r_members:-$r_pid}"
 
-        # Determine if registered app has user focus
-        local is_focused=0
+        # Determine if registered app has user focus or is visible on screen
+        local is_active=0
         if [[ -n "$active_pid" ]]; then
             for mp in "${mem_array[@]}"; do
                 if [ "$mp" = "$active_pid" ]; then
-                    is_focused=1
+                    is_active=1
                     break
                 fi
             done
         fi
 
-        if [ "$is_focused" -eq 0 ] && [[ -n "$active_class" && -n "$r_class" && "${active_class,,}" = "${r_class,,}" ]]; then
-            is_focused=1
+        if [ "$is_active" -eq 0 ] && [[ -n "$active_class" && -n "$r_class" && "${active_class,,}" = "${r_class,,}" ]]; then
+            is_active=1
         fi
 
-        if [ "$is_focused" -eq 1 ]; then
+        # Visibility check: if any window of this app is mapped on an active monitor, keep it awake
+        if [ "$is_active" -eq 0 ] && [ -n "$visible_clients" ]; then
+            while IFS=':' read -r v_pid v_class; do
+                [[ -n "$v_pid" ]] || continue
+                if [ "$v_pid" = "$r_pid" ] || [[ -n "$r_class" && -n "$v_class" && "${v_class,,}" == "${r_class,,}" ]]; then
+                    is_active=1
+                    break
+                fi
+            done <<< "$visible_clients"
+        fi
+
+        if [ "$is_active" -eq 1 ]; then
             # WAKE: Instant SIGCONT to root and all member processes
             kill -CONT "${mem_array[@]}" 2>/dev/null || true
         else
