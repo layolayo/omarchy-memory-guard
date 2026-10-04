@@ -80,6 +80,7 @@ OMARAM Guard provides the diagnostic agent with system facts while maintaining s
 
 ### 6. Differential Memory Profiling Security & Non-Invasive Sampling
 - **Non-Invasive Sampling:** The differential profiler samples `/proc/$PID/status`, `/proc/$PID/smaps_rollup`, and `/proc/$PID/fd/` symlink destinations without attaching ptrace, injecting code, or reading socket/file payload data.
+- **Document Path & Argument Privacy Guardrail:** Full filesystem paths of opened files are strictly excluded from differential profile reports and public command-line arguments to prevent exposing sensitive user document paths via `/proc/*/cmdline` or process listings to other local users. Only aggregated descriptor counts and non-filesystem kernel handles (`socket:[...]`, `pipe:[...]`, `anon_inode:[...]`) are included in diagnostic summaries.
 - **Ephemeral Snapshot Transport:** Temporary snapshot files are generated with mode `0600` (`chmod 600 "$snap_tmp"`) and cleaned up immediately upon agent launch or profiling abort.
 
 ### 7. Shell Script AST Scoping Integrity

@@ -334,6 +334,13 @@ class AIDifferentialProfilerSecurityTests(unittest.TestCase):
     def test_prctl_basename_sanitization(self):
         self.assertIn("${COMM##*/}", self.content)
 
+    def test_descriptor_sampling_excludes_filesystem_paths(self):
+        # Must strictly filter out filesystem paths to ensure private document paths
+        # are never leaked into command-line arguments or reports
+        self.assertIn('^(socket|pipe|anon_inode):', self.content)
+        self.assertIn("Sample of Newly Created Sockets / IPC Handles:", self.content)
+        self.assertNotIn("Sample of Newly Created Descriptors:", self.content)
+
 
 class GuardSecurityTests(unittest.TestCase):
     def setUp(self):

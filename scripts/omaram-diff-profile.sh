@@ -323,7 +323,7 @@ CPU_PCT=$(awk -v ticks="$TOTAL_TICKS" -v tck="$CLK_TCK" -v dur="$DELTA_SECS" 'BE
     printf "%.1f", pct;
 }')
 
-# FD Diffing: identify newly opened sockets / files
+# FD Diffing: identify newly opened sockets / IPC handles
 declare -A T0_MAP=()
 for item in "${T0_FD_TARGETS[@]}"; do
     [[ -n "$item" ]] && T0_MAP["$item"]=1
@@ -332,10 +332,15 @@ done
 NEW_FD_SAMPLES=()
 for item in "${T1_FD_TARGETS[@]}"; do
     [[ -z "$item" ]] && continue
-    if [[ -z "${T0_MAP["$item"]:-}" ]]; then
-        # Check if already in NEW_FD_SAMPLES
-        if [[ ${#NEW_FD_SAMPLES[@]} -lt 5 ]]; then
-            NEW_FD_SAMPLES+=("$item")
+    # Privacy & Security Guardrail: Never include filesystem paths in public reports
+    # or command-line arguments. Only sample non-filesystem kernel descriptors
+    # (sockets, pipes, anonymous inodes).
+    if [[ "$item" =~ ^(socket|pipe|anon_inode): ]]; then
+        if [[ -z "${T0_MAP["$item"]:-}" ]]; then
+            # Check if already in NEW_FD_SAMPLES
+            if [[ ${#NEW_FD_SAMPLES[@]} -lt 5 ]]; then
+                NEW_FD_SAMPLES+=("$item")
+            fi
         fi
     fi
 done
@@ -413,7 +418,7 @@ EOF
 )
 
 if [[ ${#NEW_FD_SAMPLES[@]} -gt 0 ]]; then
-    REPORT+=$'\n- **Sample of Newly Created Descriptors:**\n'
+    REPORT+=$'\n- **Sample of Newly Created Sockets / IPC Handles:**\n'
     for s in "${NEW_FD_SAMPLES[@]}"; do
         s_clean=$(printf '%s' "$s" | tr -cd '[:print:]')
         REPORT+=$(printf '  • `%s`\n' "$s_clean")

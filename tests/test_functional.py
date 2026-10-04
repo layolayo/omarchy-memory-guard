@@ -740,6 +740,51 @@ time.sleep(2)
             p.kill()
             p.wait()
 
+    def test_differential_snapshot_never_exposes_filesystem_paths(self):
+        # Verify that newly opened regular files/documents do not have their filesystem paths
+        # exposed in the differential profile report or diagnosis prompt arguments.
+        secret_filename = f"omaram_confidential_plan_{os.getpid()}.docx"
+        secret_file = Path(tempfile.gettempdir()) / secret_filename
+        secret_file.write_text("CONFIDENTIAL")
+
+        code = f"""
+import time, socket
+time.sleep(0.5)
+# Open both a network socket and a sensitive filesystem document
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+f = open("{secret_file}", "r")
+time.sleep(3)
+"""
+        p = subprocess.Popen(["python3", "-c", code])
+        try:
+            time.sleep(0.2)
+            # Run diff-profile directly
+            res = subprocess.run(
+                [str(self.diff_script), str(p.pid), "--duration", "2", "--quiet"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            out = res.stdout
+
+            # Regular file count should reflect the opened file
+            self.assertIn("Regular Files:", out)
+            # Sockets should be safely sampled as kernel handles
+            self.assertIn("Sample of Newly Created Sockets / IPC Handles:", out)
+            self.assertIn("socket:[", out)
+
+            # Filesystem path and confidential filename must NEVER appear anywhere in the output
+            self.assertNotIn(str(secret_file), out)
+            self.assertNotIn(secret_filename, out)
+            self.assertNotIn("/tmp/", out)
+            self.assertNotIn("/home/", out)
+        finally:
+            p.kill()
+            p.wait()
+            if secret_file.exists():
+                secret_file.unlink()
+
+
     def test_diagnose_integration_with_diff(self):
         p = subprocess.Popen(["sleep", "10"])
         try:
