@@ -207,12 +207,14 @@ omaram_choose() {
     done
 }
 
+VELOCITY_CACHE=$(mktemp -t omaram-vel-XXXXXX 2>/dev/null || echo "/tmp/omaram-vel-$$.cache")
+
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     watch_floating_state &
     WATCHER_PID=$!
-    trap 'rm -f "$FLOAT_CHANGED_FLAG"; kill "$WATCHER_PID" 2>/dev/null || true' EXIT
+    trap 'rm -f "$FLOAT_CHANGED_FLAG" "$VELOCITY_CACHE"; kill "$WATCHER_PID" 2>/dev/null || true' EXIT
 else
-    trap 'rm -f "$FLOAT_CHANGED_FLAG"' EXIT
+    trap 'rm -f "$FLOAT_CHANGED_FLAG" "$VELOCITY_CACHE"' EXIT
 fi
 
 while true; do
@@ -233,11 +235,21 @@ while true; do
     MEM_BOX=$(echo "$MEM_BOX" | sed $'s/.*/\033[38;5;135m&\033[0m/')
     gum style --margin "0 4" "$MEM_BOX"
     
-    # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees
-    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" '
+    # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees with velocity trends
+    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" '
         BEGIN {
             ignore["omaram"] = 1; ignore["omaram-guard"] = 1; ignore["gum"] = 1;
             ignore["bash"] = 1; ignore["ps"] = 1; ignore["xdg-terminal-exec"] = 1;
+            if (vel_file != "") {
+                while ((getline vline < vel_file) > 0) {
+                    split(vline, va, ":");
+                    if (va[1] != "" && va[2] != "" && va[3] != "") {
+                        prev_time[va[1]] = va[2];
+                        prev_rss[va[1]] = va[3];
+                    }
+                }
+                close(vel_file);
+            }
         }
         {
             pid = $1; ppid = $2; rss = $3; pmem = $4; state = $5; comm = $6;
@@ -271,23 +283,54 @@ while true; do
                     group_rss[r] = 0
                     group_pmem[r] = 0
                     group_state[r] = "S"
+                    group_members[r] = ""
                 }
                 group_count[r] += 1
                 group_rss[r] += P_rss[p]
                 group_pmem[r] += P_pmem[p]
+                group_members[r] = (group_members[r] == "" ? p : group_members[r] "," p)
                 if (P_state[p] ~ /^T/) group_state[r] = "T"
             }
             for (g = 1; g <= num_groups; g++) {
                 r = group_list[g]
                 cnt = group_count[r]
                 comm = group_comm[r]
+                rss_mb = int(group_rss[r]/1024)
                 label = (cnt > 1) ? comm " (" cnt " procs)" : comm
                 tag = (group_state[r] ~ /^T/ ? " ⏸️ PAUSED" : "")
-                printf "%8s %7d MB %6.1f%%    %s%s\n", r, int(group_rss[r]/1024), group_pmem[r], label, tag
+
+                trend = "\033[38;5;244m→\033[0m"
+                if (r in prev_time) {
+                    dt = now - prev_time[r]
+                    if (dt >= 1 && dt <= 120) {
+                        drss = rss_mb - prev_rss[r]
+                        rate = (drss * 60) / dt
+                        if (rate >= 30) trend = "\033[1;31m↑\033[0m"
+                        else if (rate <= -30) trend = "\033[1;32m↓\033[0m"
+                    }
+                }
+                new_vel[r] = r ":" now ":" rss_mb
+
+                printf "%8s %7d MB   %s   %6.1f%%    %s%s | %s\n", r, rss_mb, trend, group_pmem[r], label, tag, group_members[r]
+            }
+
+            if (vel_file != "") {
+                for (vr in new_vel) print new_vel[vr] > vel_file
+                close(vel_file)
             }
         }' | sort -k2 -n -r | head -n 5)
 
-    mapfile -t PROC_LIST < <(printf "%s" "$LIST" | grep -v '^[[:space:]]*$')
+    declare -A GROUP_MEMBERS_MAP
+    PROC_LIST=()
+    while IFS='|' read -r display_line members; do
+        display_line=$(echo "$display_line" | sed 's/[[:space:]]*$//')
+        members=$(echo "$members" | tr -d '[:space:]')
+        pid=$(echo "$display_line" | awk '{print $1}')
+        if [[ -n "$pid" && -n "$display_line" ]]; then
+            PROC_LIST+=("$display_line")
+            GROUP_MEMBERS_MAP["$pid"]="$members"
+        fi
+    done < <(printf "%s\n" "$LIST" | grep -v '^[[:space:]]*$')
 
     if [ ${#PROC_LIST[@]} -eq 0 ]; then
         gum style --foreground 220 --margin "1 7" "No high memory processes found."
@@ -295,7 +338,7 @@ while true; do
         continue
     fi
 
-    COLUMNS=$(printf "   %8s %10s %7s    %s" "PID" "RAM" "MEM %" "APP")
+    COLUMNS=$(printf "   %8s %10s %5s %7s    %s" "PID" "RAM" "TREND" "MEM %" "APP")
     HEADER_TEXT=$(printf "\n\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
     NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
 
@@ -372,13 +415,32 @@ while true; do
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
 
-    ACTION_ITEMS=(
-        "💀 Kill Process"
-        "🔄 Restart Process"
-        "$TOGGLE_ACTION"
-        "$AI_ACTION"
-        "🔙 Back to List"
-    )
+    IFS=',' read -r -a GROUP_PIDS_ARRAY <<< "${GROUP_MEMBERS_MAP[$PID]:-$PID}"
+    ACTIVE_GROUP_PIDS=()
+    for gp in "${GROUP_PIDS_ARRAY[@]}"; do
+        [[ -d "/proc/$gp" ]] && ACTIVE_GROUP_PIDS+=("$gp")
+    done
+    GROUP_COUNT=${#ACTIVE_GROUP_PIDS[@]}
+    [ "$GROUP_COUNT" -eq 0 ] && GROUP_COUNT=1
+
+    if [ "$GROUP_COUNT" -gt 1 ]; then
+        ACTION_ITEMS=(
+            "💀 Kill Entire App ($GROUP_COUNT procs)"
+            "🔄 Restart Entire App"
+            "$TOGGLE_ACTION"
+            "🔍 Inspect Child Tabs ($GROUP_COUNT procs)"
+            "$AI_ACTION"
+            "🔙 Back to List"
+        )
+    else
+        ACTION_ITEMS=(
+            "💀 Kill Process"
+            "🔄 Restart Process"
+            "$TOGGLE_ACTION"
+            "$AI_ACTION"
+            "🔙 Back to List"
+        )
+    fi
     ACTION_NAV="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc back\033[0m"
 
     ACTION=""
@@ -389,7 +451,7 @@ while true; do
     case "$ACTION" in
         *"Kill"*)
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
-            kill -9 "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
+            kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             gum style --foreground 196 --margin "1 2" "💀 Killed $NAME."
             sleep 1.5
             ;;
@@ -403,7 +465,8 @@ while true; do
                 fi
 
                 if [[ -n "$flatpak_app_id" && "$flatpak_app_id" =~ ^[a-zA-Z0-9._-]+$ ]] && command -v flatpak >/dev/null 2>&1; then
-                    kill -9 "$PID" 2>/dev/null || true
+                    mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
+                    kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
                     sleep 0.5
                     (cd "$HOME" && flatpak run "$flatpak_app_id" </dev/null >/dev/null 2>&1 & disown)
                     gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME via Flatpak sandbox launcher."
@@ -460,11 +523,126 @@ while true; do
             fi
 
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
-            kill -9 "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
+            kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             sleep 0.5
             (cd "$CWD" && "${CMD_ARGS[@]}" </dev/null >/dev/null 2>&1 & disown)
             gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME cleanly."
             sleep 1.5
+            ;;
+        *"Inspect"*)
+            while true; do
+                clear
+                gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
+                gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
+
+                CHILD_DATA=()
+                for cpid in "${ACTIVE_GROUP_PIDS[@]}"; do
+                    if [[ -d "/proc/$cpid" ]]; then
+                        c_rss_kb=$(awk '/^VmRSS:/ {print $2}' "/proc/$cpid/status" 2>/dev/null || echo "0")
+                        c_rss_mb=$(( c_rss_kb / 1024 ))
+                        c_state=$(awk '/^State:/ {print $2}' "/proc/$cpid/status" 2>/dev/null || echo "S")
+                        c_tag=""
+                        [[ "$c_state" =~ ^T ]] && c_tag=" ⏸️"
+                        c_role="child"
+                        [[ "$cpid" == "$PID" ]] && c_role="root"
+
+                        c_comm=$(cat "/proc/$cpid/comm" 2>/dev/null || echo "")
+                        c_cmd=$(tr '\0' ' ' < "/proc/$cpid/cmdline" 2>/dev/null || echo "")
+                        c_type=""
+                        if [[ "$c_cmd" =~ --type=([a-zA-Z0-9_-]+) ]]; then
+                            c_type="${BASH_REMATCH[1]}"
+                        elif [[ "$cpid" == "$PID" ]]; then
+                            c_type="main"
+                        elif [[ -n "$c_comm" && "$c_comm" != "$NAME" ]]; then
+                            c_type="$c_comm"
+                        else
+                            c_type="worker"
+                        fi
+
+                        CHILD_DATA+=("${c_rss_mb}|${cpid}|${c_role}|${c_type}|${c_tag}")
+                    fi
+                done
+
+                if [ ${#CHILD_DATA[@]} -eq 0 ]; then
+                    gum style --foreground 220 --margin "1 5" "No active child processes remaining."
+                    sleep 1.5
+                    break
+                fi
+
+                mapfile -t SORTED_CHILDREN < <(printf "%s\n" "${CHILD_DATA[@]}" | sort -t'|' -k1 -n -r)
+                ACTIVE_COUNT=${#SORTED_CHILDREN[@]}
+
+                SUB_TITLE="Inspecting $NAME (Root PID $PID) • $ACTIVE_COUNT procs"
+                if [ "$ACTIVE_COUNT" -gt 5 ]; then
+                    SUB_TITLE+=" (Top 5)"
+                fi
+                gum style --foreground 51 --align center --margin "0 0 1 0" "$SUB_TITLE"
+
+                CHILD_COLUMNS=$(printf "   %8s %8s   %-6s  %-12s" "PID" "RAM" "ROLE" "TYPE")
+                CHILD_HEADER=$(printf "\033[1;33mSelect Child Process to Manage:\033[0m\n\033[1;36m%s\033[0m" "$CHILD_COLUMNS")
+                CHILD_NAV="\033[2;38;5;244m↑↓ navigate • enter select • esc back\033[0m"
+
+                CHILD_CHOICES=()
+                DISPLAY_CHILDREN=("${SORTED_CHILDREN[@]:0:5}")
+                for item in "${DISPLAY_CHILDREN[@]}"; do
+                    IFS='|' read -r c_mb c_pid c_role c_type c_tag <<< "$item"
+                    CHILD_CHOICES+=("$(printf "%8s %5d MB   %-6s  %-12s%s" "$c_pid" "$c_mb" "$c_role" "$c_type" "$c_tag")")
+                done
+                CHILD_CHOICES+=("🔙 Back to App Menu")
+
+                SELECTED_CHILD=""
+                if ! omaram_choose CHILD_CHOICES "$CHILD_HEADER" "$CHILD_NAV" SELECTED_CHILD "51"; then
+                    break
+                fi
+
+                if [[ -z "$SELECTED_CHILD" || "$SELECTED_CHILD" == *"Back"* ]]; then
+                    break
+                fi
+
+                SELECTED_CPID=$(echo "$SELECTED_CHILD" | awk '{print $1}')
+                if [[ ! "$SELECTED_CPID" =~ ^[0-9]+$ ]] || [[ ! -d "/proc/$SELECTED_CPID" ]]; then
+                    continue
+                fi
+
+                CP_STATE=$(awk '/^State:/ {print $2}' "/proc/$SELECTED_CPID/status" 2>/dev/null || echo "S")
+                if [ "$CP_STATE" = "T" ]; then
+                    CP_TOGGLE="▶️ Resume Child (SIGCONT)"
+                else
+                    CP_TOGGLE="⏸️ Pause Child (SIGSTOP)"
+                fi
+
+                CP_ACTION_HEADER=$(printf "\n\033[1;33mManage Child PID %s \033[1;36m(%s)\033[0m:" "$SELECTED_CPID" "$NAME")
+                CP_ACTIONS=(
+                    "💀 Kill Child Process"
+                    "$CP_TOGGLE"
+                    "🔙 Back to Process List"
+                )
+
+                CP_ACTION=""
+                if ! omaram_choose CP_ACTIONS "$CP_ACTION_HEADER" "$CHILD_NAV" CP_ACTION "196"; then
+                    continue
+                fi
+
+                case "$CP_ACTION" in
+                    *"Kill"*)
+                        kill -9 "$SELECTED_CPID" 2>/dev/null || true
+                        gum style --foreground 196 --margin "1 2" "💀 Terminated child PID $SELECTED_CPID."
+                        sleep 1.2
+                        ;;
+                    *"Pause"*)
+                        kill -STOP "$SELECTED_CPID" 2>/dev/null || true
+                        gum style --foreground 220 --margin "1 2" "⏸️ Paused child PID $SELECTED_CPID."
+                        sleep 1.2
+                        ;;
+                    *"Resume"*)
+                        kill -CONT "$SELECTED_CPID" 2>/dev/null || true
+                        gum style --foreground 46 --margin "1 2" "▶️ Resumed child PID $SELECTED_CPID."
+                        sleep 1.2
+                        ;;
+                    *)
+                        ;;
+                esac
+            done
             ;;
         *"Diagnose"*)
             tile_if_floating
@@ -475,13 +653,13 @@ while true; do
             ;;
         *"Pause"*)
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
-            kill -STOP "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
+            kill -STOP "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             gum style --foreground 220 --margin "1 2" "⏸️ Paused $NAME. Execution suspended."
             sleep 2
             ;;
         *"Resume"*)
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
-            kill -CONT "$PID" "${CHILD_PIDS[@]}" 2>/dev/null || true
+            kill -CONT "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             gum style --foreground 46 --margin "1 2" "▶️ Resumed $NAME."
             sleep 1.5
             ;;

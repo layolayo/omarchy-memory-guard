@@ -267,8 +267,8 @@ class ProcessTableParsingTests(unittest.TestCase):
     def test_process_tree_aggregation(self):
         # Extract the AWK aggregation script directly from omaram-guard.sh
         guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
-        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self=\"$$\" -v parent=\"$PPID\" '")
-        start_quote = guard_content.find("'", awk_start)
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
+        start_quote = guard_content.rfind("'", 0, guard_content.find("BEGIN {", awk_start))
         end_quote = guard_content.find("' | sort -k2", start_quote)
         awk_code = guard_content[start_quote+1:end_quote]
 
@@ -288,7 +288,7 @@ class ProcessTableParsingTests(unittest.TestCase):
 9999 500 50000 0.5 S gum
 """
         res = subprocess.run(
-            ["awk", "-v", "self=8888", "-v", "parent=9999", awk_code],
+            ["awk", "-v", "self=8888", "-v", "parent=9999", "-v", "now=1000", "-v", "vel_file=", awk_code],
             input=sample_input,
             capture_output=True,
             text=True,
@@ -302,17 +302,83 @@ class ProcessTableParsingTests(unittest.TestCase):
         self.assertIn("1000", lines[0])
         self.assertIn("1400 MB", lines[0])
         self.assertIn("chromium (4 procs)", lines[0])
+        self.assertIn("1000,1001,1002,1003", lines[0])
 
         # Code: 300+200 = 500 MB (2 procs)
         self.assertIn("2000", lines[1])
         self.assertIn("500 MB", lines[1])
         self.assertIn("code (2 procs)", lines[1])
+        self.assertIn("2000,2001", lines[1])
 
         # Easyeffects: 100 MB (1 proc -> no suffix)
         self.assertIn("3000", lines[2])
         self.assertIn("100 MB", lines[2])
         self.assertIn("easyeffects", lines[2])
         self.assertNotIn("(1 procs)", lines[2])
+        self.assertIn("3000", lines[2].split("|")[1])
+
+    def test_memory_growth_velocity_indicator(self):
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
+        start_quote = guard_content.rfind("'", 0, guard_content.find("BEGIN {", awk_start))
+        end_quote = guard_content.find("' | sort -k2", start_quote)
+        awk_code = guard_content[start_quote+1:end_quote]
+
+        # Scenario: now is 1000
+        # 1000: was 1200 MB at t=940 (60s ago). Now 1400 MB (+200 MB/min >= 30) -> Up arrow ↑
+        # 2000: was 600 MB at t=940 (60s ago). Now 500 MB (-100 MB/min <= -30) -> Down arrow ↓
+        # 3000: was 100 MB at t=940 (60s ago). Now 100 MB (0 MB/min) -> Stable arrow →
+        cache_file = Path("/tmp/test_vel_cache.txt")
+        cache_file.write_text("1000:940:1200\n2000:940:600\n3000:940:100\n")
+
+        sample_input = """\
+1000 500 1433600 14.0 S chromium
+2000 500 512000 5.0 S code
+3000 500 102400 1.0 S easyeffects
+"""
+        try:
+            res = subprocess.run(
+                ["awk", "-v", "self=8888", "-v", "parent=9999", "-v", "now=1000", f"-v", f"vel_file={cache_file}", awk_code],
+                input=sample_input,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            lines = res.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 3)
+
+            # Check velocity trends
+            self.assertIn("↑", lines[0])  # Growing fast
+            self.assertIn("↓", lines[1])  # Reclaiming
+            self.assertIn("→", lines[2])  # Stable
+        finally:
+            cache_file.unlink(missing_ok=True)
+
+    def test_child_inspection_parsing_and_sorting(self):
+        # Test child data parsing and descending RSS sorting
+        bash_cmd = """
+        CHILD_DATA=("520|577895|child|renderer|" "250|577890|root|main|" "310|577901|child|gpu-process| ⏸️")
+        mapfile -t SORTED < <(printf "%s\\n" "${CHILD_DATA[@]}" | sort -t"|" -k1 -n -r)
+        for item in "${SORTED[@]}"; do
+            IFS="|" read -r c_mb c_pid c_role c_type c_tag <<< "$item"
+            printf "%8s %5d MB %-6s %-12s%s\\n" "$c_pid" "$c_mb" "$c_role" "$c_type" "$c_tag"
+        done
+        """
+        res = subprocess.run(["bash", "-c", bash_cmd], capture_output=True, text=True, check=True)
+        lines = res.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 3)
+        # Sorted by memory descending: 520 MB (577895), 310 MB (577901), 250 MB (577890)
+        self.assertIn("577895", lines[0])
+        self.assertIn("520 MB", lines[0])
+        self.assertIn("renderer", lines[0])
+
+        self.assertIn("577901", lines[1])
+        self.assertIn("310 MB", lines[1])
+        self.assertIn("gpu-process", lines[1])
+
+        self.assertIn("577890", lines[2])
+        self.assertIn("250 MB", lines[2])
+        self.assertIn("main", lines[2])
 
 
 class TUIEngineFunctionalTests(unittest.TestCase):
