@@ -469,5 +469,30 @@ class QMLIntegrityTests(unittest.TestCase):
         self.assertIn("launcher.replace(/'/g, \"'\\\\''\")", self.content)
 
 
+class AppNapWatcherSecurityTests(unittest.TestCase):
+    def setUp(self):
+        self.script = SCRIPTS_DIR / "omaram-nap-watcher.sh"
+        self.assertTrue(self.script.exists())
+        self.content = self.script.read_text()
+
+    def test_registry_permissions(self):
+        self.assertIn("mkdir -p -m 0700", self.content)
+        self.assertIn("chmod 0600", self.content)
+
+    def test_pid_and_system_critical_guards(self):
+        self.assertIn("validate_pid", self.content)
+        self.assertIn('stat -c \'%u\' "/proc/$pid"', self.content)
+        for critical in ("Hyprland", "waybar", "omarchy-shell", "systemd"):
+            self.assertIn(critical, self.content)
+
+    def test_window_title_privacy(self):
+        # Must not store window titles in registry to protect user privacy
+        self.assertNotIn(".title", self.content)
+
+    def test_metacharacter_sanitization(self):
+        self.assertIn("tr -cd '[:alnum:]_.-'", self.content)
+        self.assertIn("tr -cd '[:digit:],'", self.content)
+
+
 if __name__ == "__main__":
     unittest.main()
