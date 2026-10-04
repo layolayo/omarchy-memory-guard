@@ -258,6 +258,7 @@ omaram_choose() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VELOCITY_CACHE=$(mktemp -t omaram-vel-XXXXXX 2>/dev/null || echo "/tmp/omaram-vel-$$.cache")
+CLIENT_MAP_CACHE=$(mktemp -t omaram-clients-XXXXXX 2>/dev/null || echo "/tmp/omaram-clients-$$.cache")
 NAP_REGISTRY_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/nap.registry"
 NAP_SCRIPT="$SCRIPT_DIR/omaram-nap-watcher.sh"
 
@@ -283,9 +284,9 @@ if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     WATCHER_PID=$!
     watch_hyprland_events &
     EVENT_WATCHER_PID=$!
-    trap 'rm -f "$FLOAT_CHANGED_FLAG" "$HYPR_EVENT_FLAG" "$VELOCITY_CACHE"; kill "$WATCHER_PID" "$EVENT_WATCHER_PID" 2>/dev/null || true' EXIT
+    trap 'rm -f "$FLOAT_CHANGED_FLAG" "$HYPR_EVENT_FLAG" "$VELOCITY_CACHE" "$CLIENT_MAP_CACHE"; kill "$WATCHER_PID" "$EVENT_WATCHER_PID" 2>/dev/null || true' EXIT
 else
-    trap 'rm -f "$FLOAT_CHANGED_FLAG" "$HYPR_EVENT_FLAG" "$VELOCITY_CACHE"' EXIT
+    trap 'rm -f "$FLOAT_CHANGED_FLAG" "$HYPR_EVENT_FLAG" "$VELOCITY_CACHE" "$CLIENT_MAP_CACHE"' EXIT
 fi
 
 while true; do
@@ -308,11 +309,16 @@ while true; do
     # Mem box is 50 chars with border. Margin of 8 centers it.
     gum style --margin "0 8" "$MEM_BOX"
     
+    # Map running window classes so generic runtimes (java, python, node, electron) show real desktop app names
+    hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.pid > 0 and .class != "") | "\(.pid):\(.class)"' > "$CLIENT_MAP_CACHE" 2>/dev/null || true
+
     # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees with velocity trends
-    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" '
+    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" -v client_file="$CLIENT_MAP_CACHE" '
         BEGIN {
             ignore["omaram"] = 1; ignore["omaram-guard"] = 1; ignore["gum"] = 1;
             ignore["bash"] = 1; ignore["ps"] = 1; ignore["xdg-terminal-exec"] = 1;
+            generic["java"] = 1; generic["python"] = 1; generic["python3"] = 1;
+            generic["node"] = 1; generic["electron"] = 1; generic["ruby"] = 1; generic["perl"] = 1;
             if (vel_file != "") {
                 while ((getline vline < vel_file) > 0) {
                     split(vline, va, ":");
@@ -330,10 +336,22 @@ while true; do
                 }
                 close(nap_file);
             }
+            if (client_file != "") {
+                while ((getline cline < client_file) > 0) {
+                    split(cline, ca, ":");
+                    if (ca[1] != "" && ca[2] != "") win_class[ca[1]] = ca[2];
+                }
+                close(client_file);
+            }
         }
         {
             pid = $1; ppid = $2; rss = $3; pmem = $4; state = $5; comm = $6;
             if (pid == self || pid == parent || comm in ignore) next;
+
+            if (comm in generic) {
+                if (pid in win_class) comm = win_class[pid];
+                else if (ppid in win_class) comm = win_class[ppid];
+            }
 
             P_pid[pid] = pid
             P_ppid[pid] = ppid
@@ -470,6 +488,17 @@ while true; do
 
     NAME=$(cat "/proc/$PID/comm" 2>/dev/null || echo "process")
     NAME=${NAME##*/}
+    if [[ "$NAME" =~ ^(java|python.*|node|electron|ruby|perl)$ ]]; then
+        RESOLVED_CLASS=$(hyprctl clients -j 2>/dev/null | jq -r --argjson p "$PID" '.[] | select(.pid == $p) | .class' 2>/dev/null | head -1 || true)
+        if [ -z "$RESOLVED_CLASS" ] && [[ -n "${GROUP_MEMBERS_MAP[$PID]:-}" ]]; then
+            IFS=',' read -r -a _TMP_MEMS <<< "${GROUP_MEMBERS_MAP[$PID]}"
+            for gp in "${_TMP_MEMS[@]}"; do
+                RESOLVED_CLASS=$(hyprctl clients -j 2>/dev/null | jq -r --argjson p "$gp" '.[] | select(.pid == $p) | .class' 2>/dev/null | head -1 || true)
+                [ -n "$RESOLVED_CLASS" ] && break
+            done
+        fi
+        [ -n "$RESOLVED_CLASS" ] && NAME="$RESOLVED_CLASS"
+    fi
     [[ -n $NAME && $NAME != "-" && $NAME != "." && $NAME != ".." ]] || NAME="process"
     NAME=$(printf '%s' "$NAME" | tr -cd '[:print:]')
     [ -z "$NAME" ] && NAME="process"
