@@ -212,6 +212,23 @@ VELOCITY_CACHE=$(mktemp -t omaram-vel-XXXXXX 2>/dev/null || echo "/tmp/omaram-ve
 NAP_REGISTRY_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/nap.registry"
 NAP_SCRIPT="$SCRIPT_DIR/omaram-nap-watcher.sh"
 
+show_feedback() {
+    local color="$1"
+    local title="$2"
+    local subtitle="${3:-}"
+    local delay="${4:-1.2}"
+    local msg="$title"
+    if [ -n "$subtitle" ]; then
+        msg=$(printf "%s\n%s" "$title" "$subtitle")
+    fi
+
+    clear
+    gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+    gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
+    gum style --border normal --border-foreground "$color" --foreground "$color" --width 45 --align center --margin "1 10" "$msg"
+    sleep "$delay"
+}
+
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     watch_floating_state &
     WATCHER_PID=$!
@@ -223,10 +240,10 @@ fi
 while true; do
     clear
 
-    # Logo is 56 chars. In 64-col terminal, margin of 4 centers it ((64 - 56) / 2 = 4).
-    gum style --foreground 51 --margin "1 0 0 4" "$LOGO"
-    # Subtitle is 39 chars. Margin of 12 centers it ((64 - 39) / 2 = 12.5).
-    gum style --foreground 51 --margin "0 0 1 12" "The High Memory Guard & Diagnostic Tool"
+    # Logo is 56 chars. In 64-col terminal, margin of 5 centers it.
+    gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+    # Subtitle is 39 chars. Margin of 13 centers it.
+    gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
 
     # Memory Stats Box with Linux PSI (Pressure Stall Information)
     PSI_VAL=$(awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}' /proc/pressure/memory 2>/dev/null || echo "N/A")
@@ -237,8 +254,8 @@ while true; do
     MEM_STATS=$(echo "$MEM_STATS" | sed $'s/.*/\033[38;5;135m&\033[0m/')
     MEM_BOX=$(gum style --border rounded --padding "0 1" "$MEM_STATS")
     MEM_BOX=$(echo "$MEM_BOX" | sed $'s/.*/\033[38;5;135m&\033[0m/')
-    # Mem box is 50 chars with border. Margin of 7 centers it ((64 - 50) / 2 = 7).
-    gum style --margin "0 7" "$MEM_BOX"
+    # Mem box is 50 chars with border. Margin of 8 centers it.
+    gum style --margin "0 8" "$MEM_BOX"
     
     # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees with velocity trends
     LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" '
@@ -351,8 +368,7 @@ while true; do
     done < <(printf "%s\n" "$LIST" | grep -v '^[[:space:]]*$')
 
     if [ ${#PROC_LIST[@]} -eq 0 ]; then
-        gum style --foreground 220 --margin "1 7" "No high memory processes found."
-        sleep 1.5
+        show_feedback "220" "No High Memory Processes" "All processes within normal limits" 1.5
         continue
     fi
 
@@ -411,8 +427,8 @@ while true; do
     PSS_MB=$(( PSS_KB / 1024 ))
 
     clear
-    gum style --foreground 51 --margin "1 0 0 4" "$LOGO"
-    gum style --foreground 51 --margin "0 0 1 12" "The High Memory Guard & Diagnostic Tool"
+    gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+    gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
     
     # Process Header Details: Selected process with True Reclaim (USS) and PSS
     HEADER_DETAILS="Selected: $NAME (PID $PID)"
@@ -425,9 +441,9 @@ while true; do
         NAP_ACTION="💤 Enable App Nap"
     fi
     if [ "$USS_MB" -gt 0 ]; then
-        HEADER_DETAILS+=$'\n'"True Reclaim (USS): ${USS_MB} MB • PSS: ${PSS_MB} MB"
+        HEADER_DETAILS=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$HEADER_DETAILS" "$USS_MB" "$PSS_MB")
     fi
-    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "1 9" "$HEADER_DETAILS"
+    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "1 10" "$HEADER_DETAILS"
 
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
@@ -481,8 +497,7 @@ while true; do
             [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
-            gum style --foreground 196 --margin "1 4" "💀 Killed $NAME."
-            sleep 1.5
+            show_feedback "196" "💀 Killed $NAME" "All associated processes terminated"
             ;;
         *"Restart"*)
             [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
@@ -499,14 +514,11 @@ while true; do
                     kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
                     sleep 0.5
                     (cd "$HOME" && flatpak run "$flatpak_app_id" </dev/null >/dev/null 2>&1 & disown)
-                    gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME via Flatpak sandbox launcher."
-                    sleep 1.5
+                    show_feedback "46" "🔄 Restarted $NAME" "Via Flatpak sandbox launcher"
                 else
                     # For all other confined processes (containers, namespaces, bwrap, custom sandboxes),
                     # skip host restart to preserve the sandbox boundary and prevent host code execution.
-                    gum style --foreground 220 --margin "1 2" "⚠️ $NAME is running inside a sandbox/container."
-                    gum style --foreground 244 --margin "0 2" "Host restart skipped for security; please use its application launcher."
-                    sleep 3
+                    show_feedback "220" "⚠️ $NAME is in a sandbox" "Host restart skipped; use app launcher"
                 fi
                 continue
             fi
@@ -521,8 +533,7 @@ while true; do
             # 2. Kernel-verified binary from /proc/$PID/exe (cannot be forged by user process)
             EXE=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
             if [[ -z "$EXE" || "$EXE" != /* || ! -f "$EXE" || ! -x "$EXE" ]]; then
-                gum style --foreground 196 --margin "1 2" "❌ Cannot restart $NAME: binary missing or not executable."
-                sleep 2
+                show_feedback "196" "❌ Cannot restart $NAME" "Binary missing or not executable" 2
                 continue
             fi
 
@@ -547,8 +558,7 @@ while true; do
             fi
 
             if [ "$has_inline_code" -eq 1 ]; then
-                gum style --foreground 196 --margin "1 2" "❌ Cannot restart $NAME: inline interpreter code arguments rejected for safety."
-                sleep 2
+                show_feedback "196" "❌ Cannot restart $NAME" "inline interpreter code rejected" 2
                 continue
             fi
 
@@ -556,14 +566,13 @@ while true; do
             kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
             sleep 0.5
             (cd "$CWD" && "${CMD_ARGS[@]}" </dev/null >/dev/null 2>&1 & disown)
-            gum style --foreground 46 --margin "1 2" "🔄 Restarted $NAME cleanly."
-            sleep 1.5
+            show_feedback "46" "🔄 Restarted $NAME cleanly" "Fresh instance launched" 1.5
             ;;
         *"Inspect"*)
             while true; do
                 clear
-                gum style --foreground 51 --margin "1 0 0 4" "$LOGO"
-                gum style --foreground 51 --margin "0 0 1 12" "The High Memory Guard & Diagnostic Tool"
+                gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+                gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
 
                 CHILD_DATA=()
                 for cpid in "${ACTIVE_GROUP_PIDS[@]}"; do
@@ -594,8 +603,7 @@ while true; do
                 done
 
                 if [ ${#CHILD_DATA[@]} -eq 0 ]; then
-                    gum style --foreground 220 --margin "1 5" "No active child processes remaining."
-                    sleep 1.5
+                    show_feedback "220" "No Child Processes" "No active child processes remaining" 1.5
                     break
                 fi
 
@@ -656,18 +664,15 @@ while true; do
                 case "$CP_ACTION" in
                     *"Kill"*)
                         kill -9 "$SELECTED_CPID" 2>/dev/null || true
-                        gum style --foreground 196 --margin "1 2" "💀 Terminated child PID $SELECTED_CPID."
-                        sleep 1.2
+                        show_feedback "196" "💀 Terminated Child PID $SELECTED_CPID" "Child process terminated" 1.2
                         ;;
                     *"Pause"*)
                         kill -STOP "$SELECTED_CPID" 2>/dev/null || true
-                        gum style --foreground 220 --margin "1 2" "⏸️ Paused child PID $SELECTED_CPID."
-                        sleep 1.2
+                        show_feedback "220" "⏸️ Paused Child PID $SELECTED_CPID" "Child execution suspended (SIGSTOP)" 1.2
                         ;;
                     *"Resume"*)
                         kill -CONT "$SELECTED_CPID" 2>/dev/null || true
-                        gum style --foreground 46 --margin "1 2" "▶️ Resumed child PID $SELECTED_CPID."
-                        sleep 1.2
+                        show_feedback "46" "▶️ Resumed Child PID $SELECTED_CPID" "Child execution resumed (SIGCONT)" 1.2
                         ;;
                     *)
                         ;;
@@ -677,8 +682,7 @@ while true; do
         *"App Nap"*)
             if [ "$IS_NAPPING" -eq 1 ]; then
                 [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
-                gum style --foreground 46 --margin "1 4" "☀️ App Nap disabled. $NAME running normally."
-                sleep 1.2
+                show_feedback "46" "☀️ App Nap Disabled: $NAME" "Application running normally" 1.2
             else
                 local win_class=""
                 win_class=$(hyprctl clients -j 2>/dev/null | jq -r --argjson p "$PID" '.[] | select(.pid == $p) | .class' 2>/dev/null | head -1 || true)
@@ -686,28 +690,24 @@ while true; do
                 local member_str
                 member_str=$(IFS=,; echo "${ACTIVE_GROUP_PIDS[*]}")
                 [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" add "$PID" "$win_class" "$member_str" 2>/dev/null || true
-                gum style --foreground 51 --margin "1 4" "💤 App Nap enabled for $NAME (will auto-sleep on unfocus)."
-                sleep 1.2
+                show_feedback "51" "💤 App Nap Enabled: $NAME" "Auto-sleeps on unfocus • Wakes on focus" 1.2
             fi
             ;;
         *"Diagnose"*)
             tile_if_floating
             SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
             "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" >/dev/null 2>&1 &
-            gum style --foreground 51 --margin "1 2" "⏸️ Paused $NAME & launched AI diagnostic agent."
-            sleep 2.5
+            show_feedback "51" "🤖 AI Diagnostics Launched" "Process paused & inspector attached" 2.5
             ;;
         *"Pause"*)
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -STOP "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
-            gum style --foreground 220 --margin "1 2" "⏸️ Paused $NAME. Execution suspended."
-            sleep 2
+            show_feedback "220" "⏸️ Paused $NAME" "Execution suspended (SIGSTOP)" 1.5
             ;;
         *"Resume"*)
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -CONT "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
-            gum style --foreground 46 --margin "1 2" "▶️ Resumed $NAME."
-            sleep 1.5
+            show_feedback "46" "▶️ Resumed $NAME" "Execution resumed (SIGCONT)" 1.5
             ;;
         *)
             continue
