@@ -390,7 +390,7 @@ SOCK_SIGN=""
 (( DELTA_SOCKS > 0 )) && SOCK_SIGN="+"
 
 REPORT=$(cat <<EOF
-### 📸 ${DELTA_SECS}-Second Differential Memory Snapshot Profile
+### 📸 ${DURATION}-Second Differential Memory Snapshot Profile
 - **Target Process:** \`$COMM\` (PID $PID)
 - **Observation Window:** ${DELTA_SECS} seconds (\$T_0 \to T_{${DELTA_SECS}}\$)
 - **Diagnostic Verdict:** **$VERDICT**
