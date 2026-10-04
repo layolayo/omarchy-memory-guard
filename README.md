@@ -11,13 +11,26 @@ A native Omarchy shell widget that monitors system memory, dispatches proactive 
 - **Live Memory Indicator & Proactive Alerts:** Changes from normal to amber (75%+) to red (90%+) on your top bar. Automatically fires Omarchy desktop notifications when RAM crosses 80% (Warning) and 90% (Critical).
 - **Click-to-Open Notifications:** Clicking any memory alert toast immediately opens the floating OMARAM Guard window.
 - **Floating Interactive Manager:** Clicking the bar widget or alert toast launches a perfectly sized (`465x410`), floating, centered terminal UI.
+- **Process Tree Aggregation:** Automatically groups multi-process applications (Chromium, Brave, Electron, VS Code) under their root parent process with combined memory and child counts (e.g. `chromium (23 procs) — 4.3 GB`), preventing helper processes from crowding the monitor.
+- **Linux PSI (Pressure Stall Information):** Directly monitors kernel memory pressure stalls (`/proc/pressure/memory`) to differentiate between benign cached disk RAM and true memory starvation/thrashing.
 - **Context-Aware Process Actions:** Dynamically adapts available actions based on whether the selected application is actively running or already suspended:
   - `Restart Process`: Safely re-launches the application to flush RAM instantly while strictly preserving sandbox confinement (detects namespaces, Flatpaks, and containers to prevent host code execution, restarting Flatpaks via their sandbox launcher).
   - `Pause (SIGSTOP)`: (Shown when running) Freezes execution to halt runaway memory growth without losing unsaved application state.
   - `Resume (SIGCONT)`: (Shown when paused) Resumes a suspended process once system pressure subsides.
   - `Diagnose with AI (SIGSTOP)`: Freezes the process and launches Omarchy's default AI agent (`omarchy-agent`). Automatically snaps OMARAM Guard into tiled mode if currently floating, positioning the process monitor and the diagnostic agent terminal side-by-side without visual overlap.
-  - `Kill (SIGKILL)`: Immediately terminates unresponsive processes.
+  - `Kill (SIGKILL)`: Immediately terminates unresponsive processes and their child helper processes.
 - **Zero Config Pollution:** Transient Hyprland floating rules applied ephemerally on launch without modifying your persistent configuration files.
+
+### Understanding Memory Metrics: RSS, USS, and PSS
+
+Standard Linux utilities (`ps`, `top`) only report **RSS**, which can be misleading when diagnosing memory pressure or deciding which application to terminate. When any application is selected, OMARAM Guard queries `/proc/$PID/smaps_rollup` in sub-millisecond time to provide an honest breakdown:
+
+| Metric | Full Name | What It Measures | Practical Meaning |
+| :--- | :--- | :--- | :--- |
+| **RSS** | *Resident Set Size* | Total physical RAM mapped into the process's page table. | Includes shared libraries (`libc.so`, graphics drivers, fonts) shared with other programs. Terminating the process will **not** free this shared memory. |
+| **USS** | *Unique Set Size* *(True Reclaim)* | Private physical RAM (`Private_Clean + Private_Dirty`) exclusive to this process. | **The actual RAM you will get back.** This memory is guaranteed to be returned to the OS immediately if the process is terminated. |
+| **PSS** | *Proportional Set Size* | Private RAM plus a proportional fraction of shared libraries. | If a 100 MB library is shared by 5 apps, each app accounts for 20 MB in its PSS. Represents the app's fair-share memory footprint. |
+| **PSI** | *Pressure Stall Information* | Percentage of CPU time threads spend stalled on memory/swap I/O. | Distinguishes full RAM used for fast disk cache (smooth system) from true memory thrashing (stuttering/freezing desktop). |
 
 ## Security & Privacy Architecture
 
