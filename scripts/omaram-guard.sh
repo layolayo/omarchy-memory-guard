@@ -663,15 +663,13 @@ while true; do
     fi
     gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "0 10" "$HEADER_DETAILS"
 
-    DIFF_ACTION="📸 Profile Leaks with AI (30s Delta)"
+    AI_ACTION="🤖 Diagnose with AI"
     if [ "$PROC_STATE" = "T" ]; then
         ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
         TOGGLE_ACTION="▶️ Resume (SIGCONT)"
-        AI_ACTION="🤖 Diagnose with AI (Point-in-Time)"
     else
         ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;32m(Status: RUNNING)\033[0m:")
         TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
-        AI_ACTION="🤖 Diagnose with AI (Point-in-Time)"
     fi
 
     if [ "$GROUP_COUNT" -gt 1 ]; then
@@ -681,7 +679,6 @@ while true; do
             "$NAP_ACTION"
             "$TOGGLE_ACTION"
             "🔍 Inspect Child Tabs ($GROUP_COUNT procs)"
-            "$DIFF_ACTION"
             "$AI_ACTION"
             "🔙 Back to List"
         )
@@ -691,7 +688,6 @@ while true; do
             "🔄 Restart Process"
             "$NAP_ACTION"
             "$TOGGLE_ACTION"
-            "$DIFF_ACTION"
             "$AI_ACTION"
             "🔙 Back to List"
         )
@@ -905,40 +901,107 @@ while true; do
                 show_feedback "51" "💤 App Nap Enabled: $NAME" "Auto-sleeps on unfocus • Wakes on focus" 1.2
             fi
             ;;
-        *"Profile"*)
-            clear
-            snap_tmp=$(mktemp -t omaram-diff-XXXXXX)
-            chmod 600 "$snap_tmp"
-
-            diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
-            if [ ! -x "$diff_script" ]; then
-                show_feedback "196" "❌ Profiler Missing" "Cannot find omaram-diff-profile.sh" 2
-                rm -f "$snap_tmp"
-                continue
-            fi
-
-            prof_code=0
-            "$diff_script" "$PID" --duration 30 --output "$snap_tmp" --progress || prof_code=$?
-
-            if [ "$prof_code" -eq 130 ]; then
-                rm -f "$snap_tmp"
-                show_feedback "220" "⚠️ Profiling Aborted" "Differential sampling cancelled" 1.5
-                continue
-            elif [ "$prof_code" -ne 0 ]; then
-                rm -f "$snap_tmp"
-                show_feedback "196" "❌ Profiling Failed" "Process exited or access denied" 2
-                continue
-            fi
-
-            tile_if_floating
-            "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" --snapshot-file "$snap_tmp" >/dev/null 2>&1 &
-            show_feedback "51" "📸 Differential AI Attached" "Process paused & 30s diff loaded" 2.5
-            ;;
         *"Diagnose"*)
-            tile_if_floating
-            SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-            "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" >/dev/null 2>&1 &
-            show_feedback "51" "🤖 AI Diagnostics Launched" "Process paused & inspector attached" 2.5
+            while true; do
+                clear
+                gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+                gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
+
+                DIAG_BOX="Target: $NAME (PID $PID)"
+                if [ "$USS_MB" -gt 0 ]; then
+                    DIAG_BOX=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$DIAG_BOX" "$USS_MB" "$PSS_MB")
+                fi
+                gum style --border normal --border-foreground 51 --foreground 51 --width 45 --align center --margin "0 10" "$DIAG_BOX"
+
+                DIAG_HEADER=$(printf "\033[1;33mSelect AI Diagnostic Mode:\033[0m")
+                DIAG_ITEMS=(
+                    "⚡ Instant Diagnostics (Inspect Frozen State)"
+                    "📸 30s Differential Profiler (Measure Leak Rate)"
+                    "⏱️ 10s Quick Differential Profiler (Fast Delta)"
+                    "🔙 Back to Process Actions"
+                )
+                DIAG_NAV="\033[2;38;5;244m↑↓ navigate • enter select • esc back\033[0m"
+
+                DIAG_MODE=""
+                if ! omaram_choose DIAG_ITEMS "$DIAG_HEADER" "$DIAG_NAV" DIAG_MODE "51" 4; then
+                    break
+                fi
+
+                case "$DIAG_MODE" in
+                    *"Instant"*)
+                        tile_if_floating
+                        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+                        "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" >/dev/null 2>&1 &
+                        show_feedback "51" "🤖 AI Diagnostics Launched" "Process paused & inspector attached" 2.5
+                        break 2
+                        ;;
+                    *"30s"*)
+                        clear
+                        local snap_tmp
+                        snap_tmp=$(mktemp -t omaram-diff-XXXXXX)
+                        chmod 600 "$snap_tmp"
+
+                        local diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
+                        if [ ! -x "$diff_script" ]; then
+                            show_feedback "196" "❌ Profiler Missing" "Cannot find omaram-diff-profile.sh" 2
+                            rm -f "$snap_tmp"
+                            continue
+                        fi
+
+                        local prof_code=0
+                        "$diff_script" "$PID" --duration 30 --output "$snap_tmp" --progress || prof_code=$?
+
+                        if [ "$prof_code" -eq 130 ]; then
+                            rm -f "$snap_tmp"
+                            show_feedback "220" "⚠️ Profiling Aborted" "Differential sampling cancelled" 1.5
+                            continue
+                        elif [ "$prof_code" -ne 0 ]; then
+                            rm -f "$snap_tmp"
+                            show_feedback "196" "❌ Profiling Failed" "Process exited or access denied" 2
+                            continue
+                        fi
+
+                        tile_if_floating
+                        "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" --snapshot-file "$snap_tmp" >/dev/null 2>&1 &
+                        show_feedback "51" "📸 Differential AI Attached" "Process paused & 30s diff loaded" 2.5
+                        break 2
+                        ;;
+                    *"10s"*)
+                        clear
+                        local snap_tmp
+                        snap_tmp=$(mktemp -t omaram-diff-XXXXXX)
+                        chmod 600 "$snap_tmp"
+
+                        local diff_script="$SCRIPT_DIR/omaram-diff-profile.sh"
+                        if [ ! -x "$diff_script" ]; then
+                            show_feedback "196" "❌ Profiler Missing" "Cannot find omaram-diff-profile.sh" 2
+                            rm -f "$snap_tmp"
+                            continue
+                        fi
+
+                        local prof_code=0
+                        "$diff_script" "$PID" --duration 10 --output "$snap_tmp" --progress || prof_code=$?
+
+                        if [ "$prof_code" -eq 130 ]; then
+                            rm -f "$snap_tmp"
+                            show_feedback "220" "⚠️ Profiling Aborted" "Differential sampling cancelled" 1.5
+                            continue
+                        elif [ "$prof_code" -ne 0 ]; then
+                            rm -f "$snap_tmp"
+                            show_feedback "196" "❌ Profiling Failed" "Process exited or access denied" 2
+                            continue
+                        fi
+
+                        tile_if_floating
+                        "$SCRIPT_DIR/omaram-diagnose.sh" "$PID" --snapshot-file "$snap_tmp" >/dev/null 2>&1 &
+                        show_feedback "51" "📸 Differential AI Attached" "Process paused & 10s diff loaded" 2.5
+                        break 2
+                        ;;
+                    *"Back"*|"")
+                        break
+                        ;;
+                esac
+            done
             ;;
         *"Pause"*)
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
