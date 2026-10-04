@@ -225,7 +225,7 @@ show_feedback() {
     clear
     gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
     gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
-    gum style --border normal --border-foreground "$color" --foreground "$color" --width 45 --align center --margin "1 10" "$msg"
+    gum style --border normal --border-foreground "$color" --foreground "$color" --width 45 --align center --margin "0 10" "$msg"
     sleep "$delay"
 }
 
@@ -443,7 +443,7 @@ while true; do
     if [ "$USS_MB" -gt 0 ]; then
         HEADER_DETAILS=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$HEADER_DETAILS" "$USS_MB" "$PSS_MB")
     fi
-    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "1 10" "$HEADER_DETAILS"
+    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "0 10" "$HEADER_DETAILS"
 
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
