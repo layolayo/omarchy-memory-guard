@@ -128,10 +128,16 @@ omaram_choose() {
     local _out_var="$4"
     local _color="${5:-196}"
     local _indent="${6:-0}"
-    local _selected=0
+    local _initial_sel="${7:-0}"
+    local _allow_refresh="${8:-0}"
+    local _selected="$_initial_sel"
     local _num=${#_items[@]}
     local ESC=$'\e'
+    local _idle_ticks=0
     [ "$_num" -eq 0 ] && return 1
+
+    [ "$_selected" -ge "$_num" ] && _selected=0
+    [ "$_selected" -lt 0 ] && _selected=0
 
     printf "\033[?25l"
     trap 'printf "\033[?25h"' RETURN INT TERM
@@ -183,12 +189,23 @@ omaram_choose() {
                 printf "\033[%dA" "$((_num + 1))"
                 _draw
             fi
+            if [ "$_allow_refresh" -eq 1 ]; then
+                _idle_ticks=$(( _idle_ticks + 1 ))
+                # 15 ticks * 0.15s = ~2.2 seconds of idle time
+                if [ "$_idle_ticks" -ge 15 ]; then
+                    printf "\033[?25h"
+                    LAST_SELECTED_INDEX="$_selected"
+                    return 200
+                fi
+            fi
             continue
         elif [ "$status" -ne 0 ]; then
             # EOF or read error (e.g. terminal disconnected or piped input closed)
             printf "\033[?25h"
             return 130
         fi
+
+        _idle_ticks=0
 
         if [[ "$key" == "$ESC" ]]; then
             local rest=""
@@ -218,6 +235,7 @@ omaram_choose() {
             return 130
         elif [[ "$key" == "" ]]; then
             printf "\033[?25h"
+            LAST_SELECTED_INDEX=0
             printf -v "$_out_var" "%s" "${_items[$_selected]}"
             return 0
         fi
@@ -343,12 +361,18 @@ while true; do
                 comm = group_comm[r]
                 rss_mb = int(group_rss[r]/1024)
                 label = (cnt > 1) ? comm " (" cnt " procs)" : comm
+                if (length(label) > 18) {
+                    label = (cnt > 1) ? comm " (" cnt "p)" : comm
+                }
+                if (length(label) > 18) {
+                    label = substr(label, 1, 17) "…"
+                }
 
                 # Status tag: Minimal icons without words
                 if (r in nap_pids) {
-                    tag = (group_state[r] ~ /^T/ ? " 💤" : " ☀️")
+                    tag = (group_state[r] ~ /^T/ ? "💤" : "☀️")
                 } else {
-                    tag = (group_state[r] ~ /^T/ ? " ⏸️" : "")
+                    tag = (group_state[r] ~ /^T/ ? "⏸️" : "  ")
                 }
 
                 trend = "\033[38;5;244m→\033[0m"
@@ -363,7 +387,7 @@ while true; do
                 }
                 new_vel[r] = r ":" now ":" rss_mb
 
-                printf "%8s %7d MB   %s   %6.1f%%    %s%s | %s\n", r, rss_mb, trend, group_pmem[r], label, tag, group_members[r]
+                printf "%8s %7d MB   %s   %6.1f%%    %-18s %s | %s\n", r, rss_mb, trend, group_pmem[r], label, tag, group_members[r]
             }
 
             if (vel_file != "") {
@@ -389,12 +413,16 @@ while true; do
         continue
     fi
 
-    COLUMNS=$(printf "   %8s %10s %5s %7s    %s" "PID" "RAM" "TREND" "MEM %" "APP")
-    HEADER_TEXT=$(printf "\n\033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+    COLUMNS=$(printf "   %8s %10s %5s %7s    %-18s %s" "PID" "RAM" "TREND" "MEM %" "APP" "STATE")
+    HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
     NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
 
     TARGET=""
-    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208"; then
+    omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 "${LAST_SELECTED_INDEX:-0}" 1
+    CHOOSE_STATUS=$?
+    if [ "$CHOOSE_STATUS" -eq 200 ]; then
+        continue
+    elif [ "$CHOOSE_STATUS" -ne 0 ]; then
         exit 130
     fi
 
@@ -443,6 +471,8 @@ while true; do
     USS_MB=$(( USS_KB / 1024 ))
     PSS_MB=$(( PSS_KB / 1024 ))
 
+    PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
+
     clear
     gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
     gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
@@ -452,7 +482,11 @@ while true; do
     IS_NAPPING=0
     if [[ -f "$NAP_REGISTRY_FILE" ]] && grep -q "^${PID}:" "$NAP_REGISTRY_FILE" 2>/dev/null; then
         IS_NAPPING=1
-        HEADER_DETAILS+=" 💤"
+        if [[ "$PROC_STATE" =~ ^T ]]; then
+            HEADER_DETAILS+=" 💤"
+        else
+            HEADER_DETAILS+=" ☀️"
+        fi
         NAP_ACTION="☀️ Disable App Nap"
     else
         NAP_ACTION="💤 Enable App Nap"
@@ -461,8 +495,6 @@ while true; do
         HEADER_DETAILS=$(printf "%s\nTrue Reclaim (USS): %s MB • PSS: %s MB" "$HEADER_DETAILS" "$USS_MB" "$PSS_MB")
     fi
     gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "0 10" "$HEADER_DETAILS"
-
-    PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
     if [ "$PROC_STATE" = "T" ]; then
         ACTION_HEADER=$(printf "\033[1;33mSelect Action \033[1;35m(Status: PAUSED)\033[0m:")
