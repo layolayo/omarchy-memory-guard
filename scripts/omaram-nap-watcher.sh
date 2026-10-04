@@ -135,6 +135,50 @@ cmd_ensure_running() {
     (setsid "$script_path" watch >/dev/null 2>&1 &)
 }
 
+cmd_sync() {
+    [ -s "$REGISTRY_FILE" ] || return 0
+
+    local active_pid="" active_class=""
+    active_pid=$(hyprctl activewindow -j 2>/dev/null | jq -r '.pid // empty' 2>/dev/null || true)
+    active_class=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' 2>/dev/null || true)
+
+    local line r_pid r_class r_members
+    while IFS=':' read -r r_pid r_class r_members; do
+        [[ -n "$r_pid" ]] || continue
+
+        # Auto-prune dead processes
+        if [[ ! -d "/proc/$r_pid" ]]; then
+            sed -i "/^${r_pid}:/d" "$REGISTRY_FILE"
+            continue
+        fi
+
+        IFS=',' read -r -a mem_array <<< "${r_members:-$r_pid}"
+
+        # Determine if registered app has user focus
+        local is_focused=0
+        if [[ -n "$active_pid" ]]; then
+            for mp in "${mem_array[@]}"; do
+                if [ "$mp" = "$active_pid" ]; then
+                    is_focused=1
+                    break
+                fi
+            done
+        fi
+
+        if [ "$is_focused" -eq 0 ] && [[ -n "$active_class" && -n "$r_class" && "${active_class,,}" = "${r_class,,}" ]]; then
+            is_focused=1
+        fi
+
+        if [ "$is_focused" -eq 1 ]; then
+            # WAKE: Instant SIGCONT to root and all member processes
+            kill -CONT "${mem_array[@]}" 2>/dev/null || true
+        else
+            # SLEEP: Suspend unfocused process
+            kill -STOP "${mem_array[@]}" 2>/dev/null || true
+        fi
+    done < "$REGISTRY_FILE"
+}
+
 cmd_watch() {
     # Single-instance enforcement
     if [ -f "$PID_FILE" ]; then
@@ -146,7 +190,7 @@ cmd_watch() {
     fi
 
     echo "$$" > "$PID_FILE"
-    trap 'rm -f "$PID_FILE"; exit 0' EXIT TERM INT
+    trap 'pkill -P $$ 2>/dev/null || true; rm -f "$PID_FILE"; exit 0' EXIT TERM INT
 
     local sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/${HYPRLAND_INSTANCE_SIGNATURE:-}/.socket2.sock"
     if [ ! -S "$sock" ]; then
@@ -155,61 +199,13 @@ cmd_watch() {
 
     # Background event loop reading Hyprland's socket2
     # Privacy invariant: window titles are immediately discarded in memory
-    socat - "UNIX-CONNECT:$sock" 2>/dev/null | while read -r raw_event; do
-        # Only act on window focus changes
+    socat -u "UNIX-CONNECT:$sock" - 2>/dev/null | while read -r raw_event; do
         case "$raw_event" in
-            "activewindow>>"*|"activewindowv2>>"*)
-                # Exit if registry no longer exists or is empty
+            activewindow*|workspace*|focusedmon*|closewindow*)
                 if [ ! -s "$REGISTRY_FILE" ]; then
                     exit 0
                 fi
-
-                # Title Discard: Immediately strip title, keeping only class
-                local active_class=""
-                if [[ "$raw_event" =~ ^activewindow\>\> ]]; then
-                    active_class="${raw_event#activewindow>>}"
-                    active_class="${active_class%%,*}" # Title immediately stripped and dropped
-                fi
-
-                local active_pid=""
-                active_pid=$(hyprctl activewindow -j 2>/dev/null | jq -r '.pid // empty' 2>/dev/null || true)
-
-                # Read active nap entries and synchronize states
-                local line r_pid r_class r_members
-                while IFS=':' read -r r_pid r_class r_members; do
-                    [[ -n "$r_pid" ]] || continue
-
-                    # Auto-prune dead processes
-                    if [[ ! -d "/proc/$r_pid" ]]; then
-                        sed -i "/^${r_pid}:/d" "$REGISTRY_FILE"
-                        continue
-                    fi
-
-                    IFS=',' read -r -a mem_array <<< "${r_members:-$r_pid}"
-
-                    # Determine if registered app has user focus
-                    local is_focused=0
-                    if [[ -n "$active_pid" ]]; then
-                        for mp in "${mem_array[@]}"; do
-                            if [ "$mp" = "$active_pid" ]; then
-                                is_focused=1
-                                break
-                            fi
-                        done
-                    fi
-
-                    if [ "$is_focused" -eq 0 ] && [[ -n "$active_class" && -n "$r_class" && "${active_class,,}" = "${r_class,,}" ]]; then
-                        is_focused=1
-                    fi
-
-                    if [ "$is_focused" -eq 1 ]; then
-                        # WAKE: Instant SIGCONT to root and all member processes
-                        kill -CONT "${mem_array[@]}" 2>/dev/null || true
-                    else
-                        # SLEEP: Suspend unfocused process
-                        kill -STOP "${mem_array[@]}" 2>/dev/null || true
-                    fi
-                done < "$REGISTRY_FILE"
+                cmd_sync
                 ;;
         esac
     done
@@ -234,6 +230,9 @@ case "${1:-}" in
     stop)
         cmd_stop
         ;;
+    sync)
+        cmd_sync
+        ;;
     ensure-running)
         cmd_ensure_running
         ;;
@@ -241,7 +240,7 @@ case "${1:-}" in
         cmd_watch
         ;;
     *)
-        echo "Usage: $0 {add <pid> [class] [members]|remove <pid>|is-napping <pid>|list|stop|ensure-running|watch}"
+        echo "Usage: $0 {add <pid> [class] [members]|remove <pid>|is-napping <pid>|list|stop|sync|ensure-running|watch}"
         exit 1
         ;;
 esac

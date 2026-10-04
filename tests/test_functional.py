@@ -520,18 +520,24 @@ class AppNapEngineFunctionalTests(unittest.TestCase):
     def setUp(self):
         self.nap_script = SCRIPTS_DIR / "omaram-nap-watcher.sh"
         self.assertTrue(self.nap_script.exists())
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.env = os.environ.copy()
+        self.env["XDG_RUNTIME_DIR"] = self.tmp_dir.name
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
 
     def test_nap_watcher_rejects_invalid_or_restricted_pid(self):
         # Reject PID 1
-        res = subprocess.run([str(self.nap_script), "add", "1"], capture_output=True)
+        res = subprocess.run([str(self.nap_script), "add", "1"], env=self.env, capture_output=True)
         self.assertNotEqual(res.returncode, 0)
 
         # Reject non-existent PID
-        res = subprocess.run([str(self.nap_script), "add", "999999"], capture_output=True)
+        res = subprocess.run([str(self.nap_script), "add", "999999"], env=self.env, capture_output=True)
         self.assertNotEqual(res.returncode, 0)
 
         # Reject non-numeric PID
-        res = subprocess.run([str(self.nap_script), "add", "invalid_pid"], capture_output=True)
+        res = subprocess.run([str(self.nap_script), "add", "invalid_pid"], env=self.env, capture_output=True)
         self.assertNotEqual(res.returncode, 0)
 
     def test_nap_watcher_add_list_and_remove(self):
@@ -540,24 +546,24 @@ class AppNapEngineFunctionalTests(unittest.TestCase):
 
         try:
             # Add dummy process
-            res = subprocess.run([str(self.nap_script), "add", dummy_pid, "test_app", dummy_pid], capture_output=True, text=True)
+            res = subprocess.run([str(self.nap_script), "add", dummy_pid, "test_app", dummy_pid], env=self.env, capture_output=True, text=True)
             self.assertEqual(res.returncode, 0)
 
             # List must contain entry
-            res = subprocess.run([str(self.nap_script), "list"], capture_output=True, text=True)
+            res = subprocess.run([str(self.nap_script), "list"], env=self.env, capture_output=True, text=True)
             self.assertIn(f"{dummy_pid}:test_app:{dummy_pid}", res.stdout)
 
             # is-napping on running process returns 1 (awake)
-            res = subprocess.run([str(self.nap_script), "is-napping", dummy_pid])
+            res = subprocess.run([str(self.nap_script), "is-napping", dummy_pid], env=self.env)
             self.assertEqual(res.returncode, 1)
         finally:
             # Remove
-            subprocess.run([str(self.nap_script), "remove", dummy_pid], capture_output=True)
+            subprocess.run([str(self.nap_script), "remove", dummy_pid], env=self.env, capture_output=True)
             dummy.terminate()
             dummy.wait()
 
         # List must no longer contain entry
-        res = subprocess.run([str(self.nap_script), "list"], capture_output=True, text=True)
+        res = subprocess.run([str(self.nap_script), "list"], env=self.env, capture_output=True, text=True)
         self.assertNotIn(f"{dummy_pid}:test_app", res.stdout)
 
     def test_awk_tagging_with_app_nap(self):

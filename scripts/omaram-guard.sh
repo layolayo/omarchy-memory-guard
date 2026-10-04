@@ -690,6 +690,7 @@ while true; do
                 local member_str
                 member_str=$(IFS=,; echo "${ACTIVE_GROUP_PIDS[*]}")
                 [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" add "$PID" "$win_class" "$member_str" 2>/dev/null || true
+                [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" sync 2>/dev/null || true
                 show_feedback "51" "💤 App Nap Enabled: $NAME" "Auto-sleeps on unfocus • Wakes on focus" 1.2
             fi
             ;;
