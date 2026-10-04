@@ -93,14 +93,21 @@ cmd_is_napping() {
     [ -f "$REGISTRY_FILE" ] || return 2
     grep -q "^${pid}:" "$REGISTRY_FILE" || return 2
 
-    # If in registry, check process state
-    local state
-    state=$(awk '/^State:/ {print $2}' "/proc/$pid/status" 2>/dev/null || echo "S")
-    if [[ "$state" =~ ^T ]]; then
-        return 0 # Sleeping (napping)
-    else
-        return 1 # Awake & active
-    fi
+    # If in registry, check process state of root and members
+    local line
+    line=$(grep "^${pid}:" "$REGISTRY_FILE" 2>/dev/null || true)
+    local r_pid r_class r_members
+    IFS=':' read -r r_pid r_class r_members <<< "$line"
+    IFS=',' read -r -a mem_array <<< "${r_members:-$pid}"
+
+    for mp in "${mem_array[@]}"; do
+        local state
+        state=$(awk '/^State:/ {print $2}' "/proc/$mp/status" 2>/dev/null || echo "S")
+        if [[ "$state" =~ ^T ]]; then
+            return 0 # Sleeping (napping)
+        fi
+    done
+    return 1 # Awake & active
 }
 
 cmd_list() {
@@ -204,7 +211,25 @@ cmd_sync() {
             kill -CONT "${mem_array[@]}" 2>/dev/null || true
         else
             # SLEEP: Suspend unfocused process
-            kill -STOP "${mem_array[@]}" 2>/dev/null || true
+            # Smart Tab Nap: If multi-process (e.g. browser with tabs), keep root process alive to avoid
+            # freezing Wayland compositor pings, window decorations, and background audio,
+            # while sleeping all worker/renderer tabs (where 90%+ of RAM and CPU live).
+            # If single-process, sleep the root process.
+            if [ "${#mem_array[@]}" -gt 1 ]; then
+                local sleep_pids=()
+                for mp in "${mem_array[@]}"; do
+                    if [ "$mp" != "$r_pid" ]; then
+                        sleep_pids+=("$mp")
+                    fi
+                done
+                if [ "${#sleep_pids[@]}" -gt 0 ]; then
+                    kill -STOP "${sleep_pids[@]}" 2>/dev/null || true
+                else
+                    kill -STOP "$r_pid" 2>/dev/null || true
+                fi
+            else
+                kill -STOP "$r_pid" 2>/dev/null || true
+            fi
         fi
     done < "$REGISTRY_FILE"
 }

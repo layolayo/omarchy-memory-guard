@@ -454,7 +454,24 @@ while true; do
     USS_MB=$(( USS_KB / 1024 ))
     PSS_MB=$(( PSS_KB / 1024 ))
 
+    IFS=',' read -r -a GROUP_PIDS_ARRAY <<< "${GROUP_MEMBERS_MAP[$PID]:-$PID}"
+    ACTIVE_GROUP_PIDS=()
+    for gp in "${GROUP_PIDS_ARRAY[@]}"; do
+        [[ -d "/proc/$gp" ]] && ACTIVE_GROUP_PIDS+=("$gp")
+    done
+    GROUP_COUNT=${#ACTIVE_GROUP_PIDS[@]}
+    [ "$GROUP_COUNT" -eq 0 ] && GROUP_COUNT=1
+
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
+    GROUP_HAS_PAUSED=0
+    [[ "$PROC_STATE" =~ ^T ]] && GROUP_HAS_PAUSED=1
+    for gp in "${ACTIVE_GROUP_PIDS[@]}"; do
+        gp_state=$(awk '/^State:/ {print $2}' "/proc/$gp/status" 2>/dev/null || echo "S")
+        if [[ "$gp_state" =~ ^T ]]; then
+            GROUP_HAS_PAUSED=1
+            break
+        fi
+    done
 
     clear
     gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
@@ -465,7 +482,7 @@ while true; do
     IS_NAPPING=0
     if [[ -f "$NAP_REGISTRY_FILE" ]] && grep -q "^${PID}:" "$NAP_REGISTRY_FILE" 2>/dev/null; then
         IS_NAPPING=1
-        if [[ "$PROC_STATE" =~ ^T ]]; then
+        if [ "$GROUP_HAS_PAUSED" -eq 1 ]; then
             HEADER_DETAILS+=" 💤"
         else
             HEADER_DETAILS+=" ☀️"
@@ -488,14 +505,6 @@ while true; do
         TOGGLE_ACTION="⏸️ Pause (SIGSTOP)"
         AI_ACTION="🤖 Diagnose with AI (SIGSTOP)"
     fi
-
-    IFS=',' read -r -a GROUP_PIDS_ARRAY <<< "${GROUP_MEMBERS_MAP[$PID]:-$PID}"
-    ACTIVE_GROUP_PIDS=()
-    for gp in "${GROUP_PIDS_ARRAY[@]}"; do
-        [[ -d "/proc/$gp" ]] && ACTIVE_GROUP_PIDS+=("$gp")
-    done
-    GROUP_COUNT=${#ACTIVE_GROUP_PIDS[@]}
-    [ "$GROUP_COUNT" -eq 0 ] && GROUP_COUNT=1
 
     if [ "$GROUP_COUNT" -gt 1 ]; then
         ACTION_ITEMS=(
