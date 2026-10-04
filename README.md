@@ -79,6 +79,25 @@ All security and privacy invariants are continuously tested in the repository vi
 python3 tests/test_security.py -v
 ```
 
+## Roadmap & Future Capabilities
+
+OMARAM Guard is actively evolving into a complete, modern memory management tool for the Omarchy desktop:
+
+###  Delivered in Development
+- [x] **Process Tree Aggregation:** Multi-process browsers and Electron apps collapse into single line items with total combined RAM and child counts.
+- [x] **True Reclaim (USS / PSS):** Direct `/proc/$PID/smaps_rollup` extraction to display actual recoverable private memory.
+- [x] **Linux PSI Integration:** Kernel memory pressure stall tracking (`/proc/pressure/memory`) to differentiate between disk cache and true thrashing.
+- [x] **Group Signal Propagation:** Synchronized termination and pausing across parent and child helper processes.
+
+### 🎯 Planned for v1.3 (Phase 2: Dynamic Intelligence)
+- [ ] **Memory Growth Velocity (Leak Indicators):** Real-time trend arrows (`↑ +150 MB/min`, `→ stable`) to instantly separate stable heavy apps from active runaway memory leaks.
+- [ ] **Child Tab Inspection:** A drill-down view to inspect and terminate individual child renderers without closing the entire parent application.
+
+### 🔮 Planned for v1.4 (Phase 3: Desktop Shell Integration & AI)
+- [ ] **App Nap (Focus-Aware Suspension):** Automatically pause heavy background apps (`SIGSTOP`) and wake them (`SIGCONT`) when you focus their window via Hyprland socket events.
+- [ ] **OOM Post-Mortem Notifications:** Desktop notifications explaining why a background application disappeared when killed by the kernel OOM killer or `systemd-oomd`.
+- [ ] **AI Differential Profiling:** 30-second snapshot comparison in AI diagnostics to pinpoint leaking memory regions, unclosed file descriptors, or infinite loops.
+
 ## Installation
 
 Add this plugin to Omarchy using the CLI:
