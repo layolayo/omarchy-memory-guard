@@ -83,18 +83,17 @@ python3 tests/test_security.py -v
 
 OMARAM Guard is actively evolving into a complete, modern memory management tool for the Omarchy desktop:
 
-### Delivered in Development
-- [x] **Process Tree Aggregation:** Multi-process browsers and Electron apps collapse into single line items with total combined RAM and child counts.
-- [x] **True Reclaim (USS / PSS):** Direct `/proc/$PID/smaps_rollup` extraction to display actual recoverable private memory.
+### Delivered in Development (Milestone: [v1.2.0](https://github.com/layolayo/omarchy-memory-guard/milestone/1))
+- [x] **Process Tree Aggregation & True Reclaim (USS/PSS):** Multi-process browsers and Electron apps collapse into single line items with total combined RAM and child counts. Parses `/proc/$PID/smaps_rollup` to display actual recoverable private memory. ([#1](https://github.com/layolayo/omarchy-memory-guard/issues/1))
 - [x] **Linux PSI Integration:** Kernel memory pressure stall tracking (`/proc/pressure/memory`) to differentiate between disk cache and true thrashing.
 - [x] **Group Signal Propagation:** Synchronized termination and pausing across parent and child helper processes.
-- [x] **Memory Growth Velocity (Leak Indicators):** Real-time trend arrows (`↑` rapid growth $\ge 30$ MB/min, `↓` reclaiming, `→` stable) to instantly separate stable heavy apps from active runaway memory leaks.
-- [x] **Child Tab Inspection:** A drill-down view in the action menu for aggregated process trees to inspect and terminate individual child renderers without closing the entire parent application.
+- [x] **Memory Growth Velocity (Leak Indicators):** Real-time trend arrows (`↑` rapid growth $\ge 30$ MB/min, `↓` reclaiming, `→` stable) to instantly separate stable heavy apps from active runaway memory leaks. ([#2](https://github.com/layolayo/omarchy-memory-guard/issues/2))
+- [x] **Child Tab Inspection:** A drill-down view in the action menu for aggregated process trees to inspect and terminate individual child renderers without closing the entire parent application. ([#2](https://github.com/layolayo/omarchy-memory-guard/issues/2))
 
-### 🔮 Planned for v1.4 (Phase 3: Desktop Shell Integration & AI)
-- [ ] **App Nap (Focus-Aware Suspension):** Automatically pause heavy background apps (`SIGSTOP`) and wake them (`SIGCONT`) when you focus their window via Hyprland socket events.
-- [ ] **OOM Post-Mortem Notifications:** Desktop notifications explaining why a background application disappeared when killed by the kernel OOM killer or `systemd-oomd`.
-- [ ] **AI Differential Profiling:** 30-second snapshot comparison in AI diagnostics to pinpoint leaking memory regions, unclosed file descriptors, or infinite loops.
+### 🔮 Planned for v1.3 (Milestone: [v1.3.0](https://github.com/layolayo/omarchy-memory-guard/milestone/2))
+- [ ] **App Nap (Focus-Aware Suspension):** Automatically pause heavy background apps (`SIGSTOP`) and wake them (`SIGCONT`) when you focus their window via Hyprland socket events. ([#3](https://github.com/layolayo/omarchy-memory-guard/issues/3))
+- [ ] **OOM Post-Mortem Notifications:** Desktop notifications explaining why a background application disappeared when killed by the kernel OOM killer or `systemd-oomd`. ([#4](https://github.com/layolayo/omarchy-memory-guard/issues/4))
+- [ ] **AI Differential Profiling:** 30-second snapshot comparison in AI diagnostics to pinpoint leaking memory regions, unclosed file descriptors, or infinite loops. ([#5](https://github.com/layolayo/omarchy-memory-guard/issues/5))
 
 ## Installation
 
