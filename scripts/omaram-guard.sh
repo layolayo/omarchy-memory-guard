@@ -40,9 +40,54 @@ get_tile_action_label() {
 
 # Auto-tile OMARAM window if it is currently floating so AI diagnosis fits side-by-side
 tile_if_floating() {
-    if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
-        hyprctl eval 'for _, w in ipairs(hl.get_windows()) do if w.class == "org.omarchy.terminal.omaram" or w.title == "OMARAM-GUARD" then if w.floating then hl.dispatch(hl.dsp.window.float({ window = w, action = "off" })) end; break end end' >/dev/null 2>&1 || true
+    if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+        return 0
     fi
+
+    local active_json active_addr is_floating active_class
+    active_json=$(hyprctl activewindow -j 2>/dev/null || true)
+    active_addr=$(echo "$active_json" | jq -r '.address // empty' 2>/dev/null || true)
+    is_floating=$(echo "$active_json" | jq -r '.floating // false' 2>/dev/null || true)
+    active_class=$(echo "$active_json" | jq -r '.class // empty' 2>/dev/null || true)
+
+    # 1. If currently focused active window is OMARAM and floating, unfloat it directly
+    if [[ "$is_floating" == "true" && -n "$active_addr" ]] && [[ "$active_class" == *"omaram"* || "$active_json" == *"OMARAM"* ]]; then
+        hyprctl dispatch "hl.dsp.window.float({ window = 'address:$active_addr', action = 'off' })" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    # 2. Look for OMARAM window in client list (by class, initialClass, title, or PID)
+    local clients_json omaram_addr
+    clients_json=$(hyprctl clients -j 2>/dev/null || true)
+    if [[ -n "$clients_json" ]]; then
+        omaram_addr=$(echo "$clients_json" | jq -r --arg self "$$" --arg ppid "$PPID" '
+            .[] | select(
+                (.floating == true) and (
+                    (.class == "org.omarchy.terminal.omaram") or
+                    (.initialClass == "org.omarchy.terminal.omaram") or
+                    ((.title // "") | contains("OMARAM")) or
+                    (.pid == ($self | tonumber)) or
+                    (.pid == ($ppid | tonumber))
+                )
+            ) | .address' 2>/dev/null | head -1)
+
+        if [[ -n "$omaram_addr" ]]; then
+            hyprctl dispatch "hl.dsp.window.float({ window = 'address:$omaram_addr', action = 'off' })" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    # 3. Direct compositor Lua fallback without early loop termination
+    hyprctl eval '
+        for _, w in ipairs(hl.get_windows()) do
+            local match = (w.class == "org.omarchy.terminal.omaram")
+                or (w.initial_class == "org.omarchy.terminal.omaram")
+                or (w.title and string.find(w.title, "OMARAM"))
+            if match and w.floating then
+                hl.dispatch(hl.dsp.window.float({ window = w, action = "off" }))
+            end
+        end
+    ' >/dev/null 2>&1 || true
 }
 
 # Detect whether a process is running inside a sandbox or container (Flatpak, Snap, bwrap, Docker, or isolated namespaces)

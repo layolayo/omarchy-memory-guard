@@ -213,6 +213,43 @@ if [[ "$report_only" -eq 1 ]]; then
   exit 0
 fi
 
+# Ensure any floating OMARAM window is snapped to tile so agent opens side-by-side
+tile_if_floating() {
+  if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    return 0
+  fi
+
+  local clients_json omaram_addr
+  clients_json=$(hyprctl clients -j 2>/dev/null || true)
+  if [[ -n "$clients_json" ]]; then
+    omaram_addr=$(echo "$clients_json" | jq -r '
+      .[] | select(
+        (.floating == true) and (
+          (.class == "org.omarchy.terminal.omaram") or
+          (.initialClass == "org.omarchy.terminal.omaram") or
+          ((.title // "") | contains("OMARAM"))
+        )
+      ) | .address' 2>/dev/null | head -1)
+
+    if [[ -n "$omaram_addr" ]]; then
+      hyprctl dispatch "hl.dsp.window.float({ window = '\''address:'\'' .. omaram_addr, action = '\''off'\'' })" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  hyprctl eval '
+    for _, w in ipairs(hl.get_windows()) do
+      local match = (w.class == "org.omarchy.terminal.omaram")
+        or (w.initial_class == "org.omarchy.terminal.omaram")
+        or (w.title and string.find(w.title, "OMARAM"))
+      if match and w.floating then
+        hl.dispatch(hl.dsp.window.float({ window = w, action = "off" }))
+      end
+    end
+  ' >/dev/null 2>&1 || true
+}
+
+tile_if_floating
+
 # 4. Launch the default Omarchy agent in an interactive floating TUI
 if [[ "$inline" -eq 1 ]]; then
   exec omarchy-agent --inline --prompt "$prompt"
