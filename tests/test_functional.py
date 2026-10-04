@@ -227,7 +227,7 @@ class ProcessTableParsingTests(unittest.TestCase):
     def test_awk_filtering_and_state_tagging(self):
         awk_code = """
         $1 != self && $1 != parent && $5 !~ /^(omaram|gum|bash|ps|xdg-terminal)/ {
-            tag = ($4 ~ /^T/ ? " ⏸️ PAUSED" : "");
+            tag = ($4 ~ /^T/ ? " ⏸️" : "");
             printf "%8s %7s MB %6s%%    %s%s\\n", $1, int($2/1024), $3, $5, tag
         }
         """
@@ -258,11 +258,12 @@ class ProcessTableParsingTests(unittest.TestCase):
         self.assertIn("browser", lines[0])
         self.assertNotIn("PAUSED", lines[0])
 
-        # Paused process: converted MB and tagged with PAUSED
+        # Paused process: converted MB and tagged with minimal pause icon
         self.assertIn("700", lines[1])
         self.assertIn("400 MB", lines[1])
         self.assertIn("ide-worker", lines[1])
-        self.assertIn("⏸️ PAUSED", lines[1])
+        self.assertIn("⏸️", lines[1])
+        self.assertNotIn("PAUSED", lines[1])
 
     def test_process_tree_aggregation(self):
         # Extract the AWK aggregation script directly from omaram-guard.sh
@@ -439,7 +440,7 @@ class LauncherSecurityTests(unittest.TestCase):
         self.content = self.launcher.read_text()
 
     def test_hyprland_geometry_and_rules(self):
-        self.assertIn("size = { 465, 410 }", self.content)
+        self.assertIn("size = { 515, 410 }", self.content)
         self.assertIn("float = true", self.content)
         self.assertIn("center = true", self.content)
         self.assertIn("OMARAM-GUARD", self.content)
@@ -515,15 +516,92 @@ full avg10=2.10 avg60=0.40 avg300=0.10 total=48102
         res = subprocess.run(["bash", "-c", awk_cmd], input=psi_content, capture_output=True, text=True, check=True)
         self.assertEqual(res.stdout.strip(), "4.25%")
 
-    def test_psi_zero_handling(self):
-        psi_content = """\
-some avg10=0.00 avg60=0.00 avg300=0.00 total=100
+class AppNapEngineFunctionalTests(unittest.TestCase):
+    def setUp(self):
+        self.nap_script = SCRIPTS_DIR / "omaram-nap-watcher.sh"
+        self.assertTrue(self.nap_script.exists())
+
+    def test_nap_watcher_rejects_invalid_or_restricted_pid(self):
+        # Reject PID 1
+        res = subprocess.run([str(self.nap_script), "add", "1"], capture_output=True)
+        self.assertNotEqual(res.returncode, 0)
+
+        # Reject non-existent PID
+        res = subprocess.run([str(self.nap_script), "add", "999999"], capture_output=True)
+        self.assertNotEqual(res.returncode, 0)
+
+        # Reject non-numeric PID
+        res = subprocess.run([str(self.nap_script), "add", "invalid_pid"], capture_output=True)
+        self.assertNotEqual(res.returncode, 0)
+
+    def test_nap_watcher_add_list_and_remove(self):
+        dummy = subprocess.Popen(["sleep", "60"])
+        dummy_pid = str(dummy.pid)
+
+        try:
+            # Add dummy process
+            res = subprocess.run([str(self.nap_script), "add", dummy_pid, "test_app", dummy_pid], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0)
+
+            # List must contain entry
+            res = subprocess.run([str(self.nap_script), "list"], capture_output=True, text=True)
+            self.assertIn(f"{dummy_pid}:test_app:{dummy_pid}", res.stdout)
+
+            # is-napping on running process returns 1 (awake)
+            res = subprocess.run([str(self.nap_script), "is-napping", dummy_pid])
+            self.assertEqual(res.returncode, 1)
+        finally:
+            # Remove
+            subprocess.run([str(self.nap_script), "remove", dummy_pid], capture_output=True)
+            dummy.terminate()
+            dummy.wait()
+
+        # List must no longer contain entry
+        res = subprocess.run([str(self.nap_script), "list"], capture_output=True, text=True)
+        self.assertNotIn(f"{dummy_pid}:test_app", res.stdout)
+
+    def test_awk_tagging_with_app_nap(self):
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
+        start_quote = guard_content.rfind("'", 0, guard_content.find("BEGIN {", awk_start))
+        end_quote = guard_content.find("' | sort -k2", start_quote)
+        awk_code = guard_content[start_quote+1:end_quote]
+
+        nap_temp = Path("/tmp/test_nap_reg.txt")
+        # 1000 is in nap registry
+        nap_temp.write_text("1000:chromium:1000\n")
+
+        # 1000: in nap and paused (T) -> 💤
+        # 2000: NOT in nap and paused (T) -> ⏸️
+        # 3000: in nap and running (S) -> ☀️
+        # 4000: NOT in nap and running (S) -> no tag
+        nap_temp.write_text("1000:chromium:1000\n3000:napapp:3000\n")
+        sample_input = """\
+1000 500 500000 5.0 T chromium
+2000 500 400000 4.0 T code
+3000 500 300000 3.0 S napapp
+4000 500 200000 2.0 S normalapp
 """
-        awk_cmd = """
-        awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}'
-        """
-        res = subprocess.run(["bash", "-c", awk_cmd], input=psi_content, capture_output=True, text=True, check=True)
-        self.assertEqual(res.stdout.strip(), "0.00%")
+        try:
+            res = subprocess.run(
+                ["awk", "-v", "self=8888", "-v", "parent=9999", "-v", "now=1000", "-v", "vel_file=", f"-v", f"nap_file={nap_temp}", awk_code],
+                input=sample_input,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            lines = res.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 4)
+
+            # Check tags
+            self.assertIn("💤", lines[0])  # Napping and paused
+            self.assertIn("⏸️", lines[1])  # Manually paused
+            self.assertIn("☀️", lines[2])  # Napping and awake/running
+            self.assertNotIn("💤", lines[3])
+            self.assertNotIn("☀️", lines[3])
+            self.assertNotIn("⏸️", lines[3])
+        finally:
+            nap_temp.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ A native Omarchy shell widget that monitors system memory, dispatches proactive 
 ## Features
 - **Live Memory Indicator & Proactive Alerts:** Changes from normal to amber (75%+) to red (90%+) on your top bar. Automatically fires Omarchy desktop notifications when RAM crosses 80% (Warning) and 90% (Critical).
 - **Click-to-Open Notifications:** Clicking any memory alert toast immediately opens the floating OMARAM Guard window.
-- **Floating Interactive Manager:** Clicking the bar widget or alert toast launches a perfectly sized (`465x410`), floating, centered terminal UI.
+- **Floating Interactive Manager:** Clicking the bar widget or alert toast launches a perfectly sized (`515x410`), floating, centered terminal UI with 64 character columns.
 - **Process Tree Aggregation:** Automatically groups multi-process applications (Chromium, Brave, Electron, VS Code) under their root parent process with combined memory and child counts (e.g. `chromium (23 procs) — 4.3 GB`), preventing helper processes from crowding the monitor.
 - **Linux PSI (Pressure Stall Information):** Directly monitors kernel memory pressure stalls (`/proc/pressure/memory`) to differentiate between benign cached disk RAM and true memory starvation/thrashing.
 - **Context-Aware Process Actions:** Dynamically adapts available actions based on whether the selected application is actively running or already suspended:
@@ -83,15 +83,15 @@ python3 tests/test_security.py -v
 
 OMARAM Guard is actively evolving into a complete, modern memory management tool for the Omarchy desktop:
 
-### Delivered in Development (Milestone: [v1.2.0](https://github.com/layolayo/omarchy-memory-guard/milestone/1))
+### Delivered in Development (Milestone: [v1.2.0](https://github.com/layolayo/omarchy-memory-guard/milestone/1) & [v1.3.0](https://github.com/layolayo/omarchy-memory-guard/milestone/2))
 - [x] **Process Tree Aggregation & True Reclaim (USS/PSS):** Multi-process browsers and Electron apps collapse into single line items with total combined RAM and child counts. Parses `/proc/$PID/smaps_rollup` to display actual recoverable private memory. ([#1](https://github.com/layolayo/omarchy-memory-guard/issues/1))
 - [x] **Linux PSI Integration:** Kernel memory pressure stall tracking (`/proc/pressure/memory`) to differentiate between disk cache and true thrashing.
 - [x] **Group Signal Propagation:** Synchronized termination and pausing across parent and child helper processes.
 - [x] **Memory Growth Velocity (Leak Indicators):** Real-time trend arrows (`↑` rapid growth $\ge 30$ MB/min, `↓` reclaiming, `→` stable) to instantly separate stable heavy apps from active runaway memory leaks. ([#2](https://github.com/layolayo/omarchy-memory-guard/issues/2))
 - [x] **Child Tab Inspection:** A drill-down view in the action menu for aggregated process trees to inspect and terminate individual child renderers without closing the entire parent application. ([#2](https://github.com/layolayo/omarchy-memory-guard/issues/2))
+- [x] **Smart App Nap (Focus-Aware Suspension):** Automatically pause heavy background apps (`SIGSTOP`) and wake them (`SIGCONT`) when you focus their window via Hyprland socket events, with strict title-discarding privacy mitigation. ([#3](https://github.com/layolayo/omarchy-memory-guard/issues/3))
 
-### 🔮 Planned for v1.3 (Milestone: [v1.3.0](https://github.com/layolayo/omarchy-memory-guard/milestone/2))
-- [ ] **App Nap (Focus-Aware Suspension):** Automatically pause heavy background apps (`SIGSTOP`) and wake them (`SIGCONT`) when you focus their window via Hyprland socket events. ([#3](https://github.com/layolayo/omarchy-memory-guard/issues/3))
+### 🔮 Planned for v1.4 (Milestone: [v1.3.0](https://github.com/layolayo/omarchy-memory-guard/milestone/2))
 - [ ] **OOM Post-Mortem Notifications:** Desktop notifications explaining why a background application disappeared when killed by the kernel OOM killer or `systemd-oomd`. ([#4](https://github.com/layolayo/omarchy-memory-guard/issues/4))
 - [ ] **AI Differential Profiling:** 30-second snapshot comparison in AI diagnostics to pinpoint leaking memory regions, unclosed file descriptors, or infinite loops. ([#5](https://github.com/layolayo/omarchy-memory-guard/issues/5))
 

@@ -2,7 +2,7 @@
 # OMARAM Guard Floating Window Launcher
 
 # Register transient Hyprland window rule for perfect floating dimensions without touching persistent config
-hyprctl eval 'o.window({ title = "^(OMARAM-GUARD)$" }, { float = true, center = true, size = { 465, 410 } })' 2>/dev/null || true
+hyprctl eval 'o.window({ title = "^(OMARAM-GUARD)$" }, { float = true, center = true, size = { 515, 410 } })' 2>/dev/null || true
 
 # Resolve plugin script directory dynamically
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

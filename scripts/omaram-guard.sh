@@ -207,7 +207,10 @@ omaram_choose() {
     done
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VELOCITY_CACHE=$(mktemp -t omaram-vel-XXXXXX 2>/dev/null || echo "/tmp/omaram-vel-$$.cache")
+NAP_REGISTRY_FILE="${XDG_RUNTIME_DIR:-/run/user/$UID}/omaram/nap.registry"
+NAP_SCRIPT="$SCRIPT_DIR/omaram-nap-watcher.sh"
 
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     watch_floating_state &
@@ -220,9 +223,10 @@ fi
 while true; do
     clear
 
-    gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
-    # Logo is 56 chars. Subtitle is 39 chars. Margin of 10 perfectly centers it under the logo (2 + 8).
-    gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
+    # Logo is 56 chars. In 64-col terminal, margin of 4 centers it ((64 - 56) / 2 = 4).
+    gum style --foreground 51 --margin "1 0 0 4" "$LOGO"
+    # Subtitle is 39 chars. Margin of 12 centers it ((64 - 39) / 2 = 12.5).
+    gum style --foreground 51 --margin "0 0 1 12" "The High Memory Guard & Diagnostic Tool"
 
     # Memory Stats Box with Linux PSI (Pressure Stall Information)
     PSI_VAL=$(awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}' /proc/pressure/memory 2>/dev/null || echo "N/A")
@@ -233,10 +237,11 @@ while true; do
     MEM_STATS=$(echo "$MEM_STATS" | sed $'s/.*/\033[38;5;135m&\033[0m/')
     MEM_BOX=$(gum style --border rounded --padding "0 1" "$MEM_STATS")
     MEM_BOX=$(echo "$MEM_BOX" | sed $'s/.*/\033[38;5;135m&\033[0m/')
-    gum style --margin "0 4" "$MEM_BOX"
+    # Mem box is 50 chars with border. Margin of 7 centers it ((64 - 50) / 2 = 7).
+    gum style --margin "0 7" "$MEM_BOX"
     
     # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees with velocity trends
-    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" '
+    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" '
         BEGIN {
             ignore["omaram"] = 1; ignore["omaram-guard"] = 1; ignore["gum"] = 1;
             ignore["bash"] = 1; ignore["ps"] = 1; ignore["xdg-terminal-exec"] = 1;
@@ -249,6 +254,13 @@ while true; do
                     }
                 }
                 close(vel_file);
+            }
+            if (nap_file != "") {
+                while ((getline nline < nap_file) > 0) {
+                    split(nline, na, ":");
+                    if (na[1] != "") nap_pids[na[1]] = 1;
+                }
+                close(nap_file);
             }
         }
         {
@@ -297,7 +309,13 @@ while true; do
                 comm = group_comm[r]
                 rss_mb = int(group_rss[r]/1024)
                 label = (cnt > 1) ? comm " (" cnt " procs)" : comm
-                tag = (group_state[r] ~ /^T/ ? " ⏸️ PAUSED" : "")
+
+                # Status tag: Minimal icons without words
+                if (r in nap_pids) {
+                    tag = (group_state[r] ~ /^T/ ? " 💤" : " ☀️")
+                } else {
+                    tag = (group_state[r] ~ /^T/ ? " ⏸️" : "")
+                }
 
                 trend = "\033[38;5;244m→\033[0m"
                 if (r in prev_time) {
@@ -393,15 +411,23 @@ while true; do
     PSS_MB=$(( PSS_KB / 1024 ))
 
     clear
-    gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
-    gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
+    gum style --foreground 51 --margin "1 0 0 4" "$LOGO"
+    gum style --foreground 51 --margin "0 0 1 12" "The High Memory Guard & Diagnostic Tool"
     
     # Process Header Details: Selected process with True Reclaim (USS) and PSS
     HEADER_DETAILS="Selected: $NAME (PID $PID)"
+    IS_NAPPING=0
+    if [[ -f "$NAP_REGISTRY_FILE" ]] && grep -q "^${PID}:" "$NAP_REGISTRY_FILE" 2>/dev/null; then
+        IS_NAPPING=1
+        HEADER_DETAILS+=" 💤"
+        NAP_ACTION="☀️ Disable App Nap"
+    else
+        NAP_ACTION="💤 Enable App Nap"
+    fi
     if [ "$USS_MB" -gt 0 ]; then
         HEADER_DETAILS+=$'\n'"True Reclaim (USS): ${USS_MB} MB • PSS: ${PSS_MB} MB"
     fi
-    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "1 5" "$HEADER_DETAILS"
+    gum style --border normal --border-foreground 196 --foreground 196 --width 45 --align center --margin "1 9" "$HEADER_DETAILS"
 
     PROC_STATE=$(awk '/^State:/ {print $2}' "/proc/$PID/status" 2>/dev/null || echo "S")
 
@@ -427,6 +453,7 @@ while true; do
         ACTION_ITEMS=(
             "💀 Kill Entire App ($GROUP_COUNT procs)"
             "🔄 Restart Entire App"
+            "$NAP_ACTION"
             "$TOGGLE_ACTION"
             "🔍 Inspect Child Tabs ($GROUP_COUNT procs)"
             "$AI_ACTION"
@@ -436,6 +463,7 @@ while true; do
         ACTION_ITEMS=(
             "💀 Kill Process"
             "🔄 Restart Process"
+            "$NAP_ACTION"
             "$TOGGLE_ACTION"
             "$AI_ACTION"
             "🔙 Back to List"
@@ -450,12 +478,14 @@ while true; do
 
     case "$ACTION" in
         *"Kill"*)
+            [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
             mapfile -t CHILD_PIDS < <(pgrep -P "$PID" 2>/dev/null || true)
             kill -9 "$PID" "${CHILD_PIDS[@]}" "${ACTIVE_GROUP_PIDS[@]}" 2>/dev/null || true
-            gum style --foreground 196 --margin "1 2" "💀 Killed $NAME."
+            gum style --foreground 196 --margin "1 4" "💀 Killed $NAME."
             sleep 1.5
             ;;
         *"Restart"*)
+            [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
             # Security verification: Preserve sandbox boundaries and prevent sandbox escape.
             # A confined same-user application without host-execution permissions must not be executed on the host.
             if is_confined_or_sandboxed "$PID"; then
@@ -532,8 +562,8 @@ while true; do
         *"Inspect"*)
             while true; do
                 clear
-                gum style --foreground 51 --margin "1 0 0 2" "$LOGO"
-                gum style --foreground 51 --margin "0 0 1 10" "The High Memory Guard & Diagnostic Tool"
+                gum style --foreground 51 --margin "1 0 0 4" "$LOGO"
+                gum style --foreground 51 --margin "0 0 1 12" "The High Memory Guard & Diagnostic Tool"
 
                 CHILD_DATA=()
                 for cpid in "${ACTIVE_GROUP_PIDS[@]}"; do
@@ -643,6 +673,22 @@ while true; do
                         ;;
                 esac
             done
+            ;;
+        *"App Nap"*)
+            if [ "$IS_NAPPING" -eq 1 ]; then
+                [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" remove "$PID" 2>/dev/null || true
+                gum style --foreground 46 --margin "1 4" "☀️ App Nap disabled. $NAME running normally."
+                sleep 1.2
+            else
+                local win_class=""
+                win_class=$(hyprctl clients -j 2>/dev/null | jq -r --argjson p "$PID" '.[] | select(.pid == $p) | .class' 2>/dev/null | head -1 || true)
+                [ -z "$win_class" ] && win_class="$NAME"
+                local member_str
+                member_str=$(IFS=,; echo "${ACTIVE_GROUP_PIDS[*]}")
+                [ -x "$NAP_SCRIPT" ] && "$NAP_SCRIPT" add "$PID" "$win_class" "$member_str" 2>/dev/null || true
+                gum style --foreground 51 --margin "1 4" "💤 App Nap enabled for $NAME (will auto-sleep on unfocus)."
+                sleep 1.2
+            fi
             ;;
         *"Diagnose"*)
             tile_if_floating
