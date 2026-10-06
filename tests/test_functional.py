@@ -319,6 +319,61 @@ class ProcessTableParsingTests(unittest.TestCase):
         self.assertNotIn("(1 procs)", lines[2])
         self.assertIn("3000", lines[2].split("|")[1])
 
+    def test_process_table_accurate_percentage_calculation(self):
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
+        start_quote = guard_content.rfind("'", 0, guard_content.find("BEGIN {", awk_start))
+        end_quote = guard_content.find("' | sort -k2", start_quote)
+        awk_code = guard_content[start_quote+1:end_quote]
+
+        # 10 GB total RAM (10485760 KB)
+        # Proc 1: 1048576 KB = 10.0%
+        # Proc 2: 524288 KB  = 5.0%
+        sample_input = """\
+1000 500 1048576 0.1 S proc10pct
+2000 500 524288 0.1 S proc5pct
+"""
+        res = subprocess.run(
+            ["awk", "-v", "self=8888", "-v", "parent=9999", "-v", "now=1000", "-v", "vel_file=", "-v", "tot_mem_kb=10485760", awk_code],
+            input=sample_input,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = res.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("10.0%", lines[0])
+        self.assertIn("5.0%", lines[1])
+
+    def test_process_application_mode_aggregation(self):
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
+        start_quote = guard_content.rfind("'", 0, guard_content.find("BEGIN {", awk_start))
+        end_quote = guard_content.find("' | sort -k2", start_quote)
+        awk_code = guard_content[start_quote+1:end_quote]
+
+        # Two disjoint agy sessions and two disjoint chrome sessions
+        sample_input = """\
+1000 500 102400 1.0 S agy
+1001 500 204800 2.0 S agy
+2000 600 307200 3.0 S chrome
+2001 600 409600 4.0 S chrome
+"""
+        # App mode: should aggregate into 2 entries (chrome 700 MB and agy 300 MB)
+        res = subprocess.run(
+            ["awk", "-v", "self=8888", "-v", "parent=9999", "-v", "now=1000", "-v", "vel_file=", "-v", "mode=app", awk_code],
+            input=sample_input,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = res.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        # agy: 100+200 = 300 MB (2 procs)
+        # chrome: 300+400 = 700 MB (2 procs)
+        self.assertTrue(any("chrome (2 procs)" in l and "700 MB" in l for l in lines))
+        self.assertTrue(any("agy (2 procs)" in l and "300 MB" in l for l in lines))
+
     def test_memory_growth_velocity_indicator(self):
         guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
         awk_start = guard_content.find("ps -u \"$UID\" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk")
@@ -387,14 +442,14 @@ class TUIEngineFunctionalTests(unittest.TestCase):
     def setUp(self):
         self.guard_script = SCRIPTS_DIR / "omaram-guard.sh"
 
-    def _run_choose(self, items, stdin_seq):
+    def _run_choose(self, items, stdin_seq, listen_events=0):
         items_def = " ".join(f'"{x}"' for x in items)
         bash_cmd = f"""
         source <(sed -n '/^omaram_choose()/,/^}}/p' "{self.guard_script}")
         get_tile_action_label() {{ echo "tile"; }}
         items=({items_def})
         out=""
-        omaram_choose items "head" "foot %s" out < <(printf "{stdin_seq}") >/dev/null 2>&1
+        omaram_choose items "head" "foot %s" out 196 0 0 {listen_events} < <(printf "{stdin_seq}") >/dev/null 2>&1
         STATUS=$?
         printf '%s|%s' "$STATUS" "$out"
         """
@@ -432,6 +487,15 @@ class TUIEngineFunctionalTests(unittest.TestCase):
     def test_escape_aborts_with_130(self):
         status, out = self._run_choose(["App1", "App2", "App3"], r"\e")
         self.assertEqual(status, 130)
+
+    def test_hotkey_a_returns_toggle_code_when_listening_events(self):
+        # When listen_events=1, pressing 'a' returns status 10
+        status, out = self._run_choose(["App1", "App2"], "a", listen_events=1)
+        self.assertEqual(status, 10)
+        # When listen_events=0, 'a' does not return 10; next enter submits first item
+        status, out = self._run_choose(["App1", "App2"], r"a\n", listen_events=0)
+        self.assertEqual(status, 0)
+        self.assertEqual(out, "App1")
 
 
 class LauncherSecurityTests(unittest.TestCase):

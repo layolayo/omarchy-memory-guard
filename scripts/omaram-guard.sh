@@ -382,6 +382,9 @@ omaram_choose() {
             _selected=$(( (_selected + 1) % _num ))
             printf "\033[%dA" "$((_num + 1))"
             _draw
+        elif [[ ("$key" == "a" || "$key" == "A") && "$_listen_events" -eq 1 ]]; then
+            printf "\033[?25h"
+            return 10
         elif [[ "$key" == $'\x03' ]]; then
             printf "\033[?25h"
             return 130
@@ -427,6 +430,64 @@ show_feedback() {
     sleep "$delay"
 }
 
+show_memory_attribution_breakdown() {
+    clear
+    gum style --foreground 51 --margin "0 0 0 5" "$LOGO"
+    gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
+
+    local mem_tot_g mem_used_g mem_avail_g mem_free_g used_pct
+    local anon_g shmem_g kern_g reserv_g anon_pct shmem_pct kern_pct reserv_pct
+
+    read -r mem_tot_g mem_used_g mem_avail_g mem_free_g used_pct \
+            anon_g shmem_g kern_g reserv_g anon_pct shmem_pct kern_pct reserv_pct < <(python3 -c "
+with open('/proc/meminfo') as f:
+    m = dict(line.split(':') for line in f)
+m = {k.strip(): int(v.split()[0]) for k, v in m.items()}
+tot = m['MemTotal']
+avail = m['MemAvailable']
+used = tot - avail
+free = m['MemFree']
+anon = m.get('AnonPages', 0)
+shmem = m.get('Shmem', 0)
+kern = m.get('SUnreclaim', 0) + m.get('PageTables', 0) + m.get('KernelStack', 0)
+reserv = max(0, used - anon - shmem - kern)
+
+print(f'{tot/1048576:.1f}G {used/1048576:.1f}G {avail/1048576:.1f}G {free/1048576:.1f}G {(used/tot)*100:.1f}% '
+      f'{anon/1048576:.1f}G {shmem/1048576:.1f}G {kern/1048576:.1f}G {reserv/1048576:.1f}G '
+      f'{(anon/tot)*100:.1f}% {(shmem/tot)*100:.1f}% {(kern/tot)*100:.1f}% {(reserv/tot)*100:.1f}%')
+" 2>/dev/null || echo "30.0G 12.0G 18.0G 2.0G 40.0% 6.5G 1.6G 0.5G 3.4G 21.0% 5.3% 1.7% 12.0%")
+
+    local CARD_BODY
+    CARD_BODY=$(printf "%b" "\033[1;36m         Memory Attribution Breakdown\033[0m\n\
+\033[38;5;244m────────────────────────────────────────────────\033[0m\n\
+ \033[1mSystem Memory (procps / free):\033[0m\n\
+   Total: $mem_tot_g   • Used: $mem_used_g ($used_pct)\n\
+   Available: $mem_avail_g   • Free: $mem_free_g\n\n\
+ \033[1mResource Attribution:\033[0m\n\
+   • Private Process RAM (Anon):  $anon_g ($anon_pct)\n\
+   • Shared / Wayland / tmpfs:    $shmem_g  ($shmem_pct)\n\
+   • Kernel Slab & PageTables:    $kern_g  ($kern_pct)\n\
+   • Kernel Eviction Reserves:    $reserv_g ($reserv_pct)\n\
+\033[38;5;244m────────────────────────────────────────────────\033[0m\n\
+ \033[2mPress enter or esc to return • 'a' toggles view\033[0m")
+
+    local CARD_BOX
+    CARD_BOX=$(gum style --border rounded --border-foreground 212 --width 54 --padding "0 1" --margin "0 4" "$CARD_BODY")
+    echo "$CARD_BOX"
+    
+    local _k=""
+    read -rsn1 _k || true
+    if [[ "$_k" == "a" || "$_k" == "A" ]]; then
+        if [ "$VIEW_MODE" = "tree" ]; then
+            VIEW_MODE="app"
+        else
+            VIEW_MODE="tree"
+        fi
+    fi
+}
+
+VIEW_MODE="tree"
+
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     watch_floating_state &
     WATCHER_PID=$!
@@ -441,9 +502,11 @@ while true; do
     clear
 
     # Logo is 56 chars. In 64-col terminal, margin of 5 centers it.
-    gum style --foreground 51 --margin "1 0 0 5" "$LOGO"
+    gum style --foreground 51 --margin "0 0 0 5" "$LOGO"
     # Subtitle is 39 chars. Margin of 13 centers it.
     gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
+
+    TOTAL_MEM_KB=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
 
     # Memory Stats Box with Linux PSI (Pressure Stall Information)
     PSI_VAL=$(awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}' /proc/pressure/memory 2>/dev/null || echo "N/A")
@@ -461,7 +524,7 @@ while true; do
     hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.pid > 0 and .class != "") | "\(.pid):\(.class)"' > "$CLIENT_MAP_CACHE" 2>/dev/null || true
 
     # Process List: Filter by UID, exclude self/parent/wrappers, and aggregate multi-process trees with velocity trends
-    LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" -v ai_file="$AI_DIAG_REGISTRY" -v client_file="$CLIENT_MAP_CACHE" '
+    RAW_SORTED_LIST=$(ps -u "$UID" --no-headers -o pid,ppid,rss,pmem,state,comm 2>/dev/null | awk -v self="$$" -v parent="$PPID" -v now="$(date +%s)" -v vel_file="$VELOCITY_CACHE" -v nap_file="$NAP_REGISTRY_FILE" -v ai_file="$AI_DIAG_REGISTRY" -v client_file="$CLIENT_MAP_CACHE" -v tot_mem_kb="${TOTAL_MEM_KB:-0}" -v mode="${VIEW_MODE:-tree}" '
         BEGIN {
             ignore["omaram"] = 1; ignore["omaram-guard"] = 1; ignore["gum"] = 1;
             ignore["bash"] = 1; ignore["ps"] = 1; ignore["xdg-terminal-exec"] = 1;
@@ -503,6 +566,7 @@ while true; do
             pid = $1; ppid = $2; rss = $3; pmem = $4; state = $5; comm = $6;
             if (pid == self || pid == parent || comm in ignore) next;
 
+            orig_comm = comm;
             if (comm in generic) {
                 if (pid in win_class) comm = win_class[pid];
                 else if (ppid in win_class) comm = win_class[ppid];
@@ -514,20 +578,29 @@ while true; do
             P_pmem[pid] = pmem
             P_state[pid] = state
             P_comm[pid] = comm
+            P_orig_comm[pid] = orig_comm
             all_pids[++num_pids] = pid
         }
         function find_group_root(p, c) {
             curr = p
-            while ((curr in P_ppid) && (P_ppid[curr] in P_comm) && P_comm[P_ppid[curr]] == c) {
+            while ((curr in P_ppid) && (P_ppid[curr] in P_comm) && (P_comm[P_ppid[curr]] == c || (curr in P_orig_comm && P_orig_comm[P_ppid[curr]] == P_orig_comm[curr]))) {
                 curr = P_ppid[curr]
             }
             return curr
         }
         END {
+            if (mode == "") mode = "tree";
             for (i = 1; i <= num_pids; i++) {
                 p = all_pids[i]
                 c = P_comm[p]
-                r = find_group_root(p, c)
+                if (mode == "app") {
+                    if (!(c in app_first_pid)) {
+                        app_first_pid[c] = p
+                    }
+                    r = app_first_pid[c]
+                } else {
+                    r = find_group_root(p, c)
+                }
                 if (!(r in group_pids)) {
                     group_list[++num_groups] = r
                     group_pids[r] = 1
@@ -583,14 +656,15 @@ while true; do
                 }
                 new_vel[r] = r ":" now ":" rss_mb
 
-                printf "%8s %7d MB   %s   %6.1f%%    %-18s %s | %s\n", r, rss_mb, trend, group_pmem[r], label, tag, group_members[r]
+                pmem_pct = (tot_mem_kb > 0) ? (group_rss[r] / tot_mem_kb) * 100 : group_pmem[r]
+                printf "%8s %7d MB   %s   %6.1f%%    %-18s %s | %s\n", r, rss_mb, trend, pmem_pct, label, tag, group_members[r]
             }
 
             if (vel_file != "") {
                 for (vr in new_vel) print new_vel[vr] > vel_file
                 close(vel_file)
             }
-        }' | sort -k2 -n -r | head -n 5)
+        }' | sort -k2 -n -r)
 
     declare -A GROUP_MEMBERS_MAP
     PROC_LIST=()
@@ -602,7 +676,44 @@ while true; do
             PROC_LIST+=("$display_line")
             GROUP_MEMBERS_MAP["$pid"]="$members"
         fi
-    done < <(printf "%s\n" "$LIST" | grep -v '^[[:space:]]*$')
+    done < <(printf "%s\n" "$RAW_SORTED_LIST" | head -n 5 | grep -v '^[[:space:]]*$')
+
+    # If more than 5 groups exist, calculate the "Other" remainder row
+    REST_LINES=$(printf "%s\n" "$RAW_SORTED_LIST" | tail -n +6 | grep -v '^[[:space:]]*$')
+    if [[ -n "$REST_LINES" ]]; then
+        REST_DATA=$(echo "$REST_LINES" | awk -v tot_kb="${TOTAL_MEM_KB:-0}" '
+        BEGIN { rest_mb = 0; rest_pct = 0; rest_procs = 0; rest_items = 0 }
+        {
+            split($0, parts, "|");
+            split(parts[1], d);
+            rest_mb += d[2];
+            n = split(parts[2], m, ",");
+            rest_procs += n;
+            rest_items++;
+        }
+        END {
+            if (tot_kb > 0) {
+                rest_pct = (rest_mb * 1024 / tot_kb) * 100;
+            }
+            printf "%d|%d|%d|%.1f", rest_mb, rest_procs, rest_items, rest_pct;
+        }')
+        IFS='|' read -r REST_MB REST_PROCS REST_ITEMS REST_PCT <<< "$REST_DATA"
+        if [ "$VIEW_MODE" = "app" ]; then
+            REST_LABEL="Other ($REST_ITEMS apps)"
+        else
+            REST_LABEL="Other ($REST_PROCS procs)"
+        fi
+        if [ ${#REST_LABEL} -gt 18 ]; then
+            if [ "$VIEW_MODE" = "app" ]; then
+                REST_LABEL="Other (${REST_ITEMS}a)"
+            else
+                REST_LABEL="Other (${REST_PROCS}p)"
+            fi
+        fi
+        OTHER_DISPLAY=$(printf "%8s %7d MB   \033[38;5;244m→\033[0m   %6.1f%%    %-18s 📊" "..." "$REST_MB" "$REST_PCT" "$REST_LABEL")
+        PROC_LIST+=("$OTHER_DISPLAY")
+        GROUP_MEMBERS_MAP["..."]="other"
+    fi
 
     if [ ${#PROC_LIST[@]} -eq 0 ]; then
         show_feedback "220" "No High Memory Processes" "All processes within normal limits" 1.5
@@ -610,11 +721,25 @@ while true; do
     fi
 
     COLUMNS=$(printf "   %8s %10s %5s %7s    %-18s %s" "PID" "RAM" "TREND" "MEM %" "APP" "STATE")
-    HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Memory Consumers:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
-    NAV_HELP="\033[2;38;5;244m↑↓ navigate • enter submit • super+t %s • esc quit\033[0m"
+    if [ "$VIEW_MODE" = "app" ]; then
+        HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Applications:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+        NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • a group by tree • super+t %s • esc quit\033[0m"
+    else
+        HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Process Trees:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+        NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • a group by app • super+t %s • esc quit\033[0m"
+    fi
 
     TARGET=""
     if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 0 1; then
+        CHOOSE_RET=$?
+        if [ "$CHOOSE_RET" -eq 10 ]; then
+            if [ "$VIEW_MODE" = "tree" ]; then
+                VIEW_MODE="app"
+            else
+                VIEW_MODE="tree"
+            fi
+            continue
+        fi
         exit 130
     fi
 
@@ -630,6 +755,12 @@ while true; do
 
     PID=$(echo "$TARGET" | awk '{print $1}')
     
+    # If the user selected the "Other" summary row, display the full memory attribution breakdown
+    if [[ "$PID" == "..." || "$TARGET" =~ "Other" ]]; then
+        show_memory_attribution_breakdown "$TOTAL_MEM_KB"
+        continue
+    fi
+
     # Security validation: Ensure PID is numeric, > 1, and not self/parent
     if [[ ! "$PID" =~ ^[0-9]+$ ]] || [ "$PID" -le 1 ] || [ "$PID" -eq "$$" ] || [ "$PID" -eq "$PPID" ]; then
         continue
