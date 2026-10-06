@@ -493,13 +493,19 @@ print(f'{tot/1048576:.1f}G {used/1048576:.1f}G {avail/1048576:.1f}G {free/104857
         else
             VIEW_MODE="tree"
         fi
+        echo "$VIEW_MODE" > "$VIEW_MODE_PREF_FILE" 2>/dev/null || true
         MAIN_SEL=0
     fi
 
     while IFS= read -rsn1 -t 0.02 _discard 2>/dev/null; do :; done
 }
 
-VIEW_MODE="tree"
+VIEW_MODE_PREF_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/omaram_view_mode"
+VIEW_MODE="app"
+if [[ -f "$VIEW_MODE_PREF_FILE" ]]; then
+    _saved_mode=$(cat "$VIEW_MODE_PREF_FILE" 2>/dev/null || true)
+    [[ "$_saved_mode" == "tree" || "$_saved_mode" == "app" ]] && VIEW_MODE="$_saved_mode"
+fi
 MAIN_SEL=0
 
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
@@ -752,6 +758,7 @@ while true; do
             else
                 VIEW_MODE="tree"
             fi
+            echo "$VIEW_MODE" > "$VIEW_MODE_PREF_FILE" 2>/dev/null || true
             MAIN_SEL=0
             continue
         fi
