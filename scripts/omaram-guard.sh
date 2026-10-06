@@ -743,25 +743,25 @@ while true; do
     COLUMNS=$(printf "   %8s %10s %5s %7s    %-18s %s" "PID" "RAM" "TREND" "MEM %" "APP" "STATE")
     if [ "$VIEW_MODE" = "app" ]; then
         HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Applications:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
-        NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • a group by tree • super+t %s • esc quit\033[0m"
+        NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • 'a' tree view • super+t %s • esc quit\033[0m"
     else
         HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Process Trees:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
-        NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • a group by app • super+t %s • esc quit\033[0m"
+        NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • 'a' app view • super+t %s • esc quit\033[0m"
     fi
 
     TARGET=""
-    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 "${MAIN_SEL:-0}" 1; then
-        CHOOSE_RET=$?
-        if [ "$CHOOSE_RET" -eq 10 ]; then
-            if [ "$VIEW_MODE" = "tree" ]; then
-                VIEW_MODE="app"
-            else
-                VIEW_MODE="tree"
-            fi
-            echo "$VIEW_MODE" > "$VIEW_MODE_PREF_FILE" 2>/dev/null || true
-            MAIN_SEL=0
-            continue
+    omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 "${MAIN_SEL:-0}" 1
+    CHOOSE_RET=$?
+    if [ "$CHOOSE_RET" -eq 10 ]; then
+        if [ "$VIEW_MODE" = "tree" ]; then
+            VIEW_MODE="app"
+        else
+            VIEW_MODE="tree"
         fi
+        echo "$VIEW_MODE" > "$VIEW_MODE_PREF_FILE" 2>/dev/null || true
+        MAIN_SEL=0
+        continue
+    elif [ "$CHOOSE_RET" -ne 0 ]; then
         exit 130
     fi
 
