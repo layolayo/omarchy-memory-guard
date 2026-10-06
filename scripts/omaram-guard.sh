@@ -361,7 +361,7 @@ omaram_choose() {
 
         if [[ "$key" == "$ESC" ]]; then
             local rest=""
-            IFS= read -rsn2 -t 0.05 rest || true
+            IFS= read -rsn2 -t 0.2 rest || true
             if [[ "$rest" == "[A" || "$rest" == "OA" ]]; then
                 _selected=$(( (_selected - 1 + _num) % _num ))
                 printf "\033[%dA" "$((_num + 1))"
@@ -390,7 +390,7 @@ omaram_choose() {
             return 130
         elif [[ "$key" == "" ]]; then
             printf "\033[?25h"
-            LAST_SELECTED_INDEX=0
+            LAST_SELECTED_INDEX=$_selected
             printf -v "$_out_var" "%s" "${_items[$_selected]}"
             return 0
         fi
@@ -432,6 +432,9 @@ show_feedback() {
 
 show_memory_attribution_breakdown() {
     clear
+    printf "\033[?25l"
+    trap 'printf "\033[?25h"' RETURN INT TERM
+
     gum style --foreground 51 --margin "0 0 0 5" "$LOGO"
     gum style --foreground 51 --margin "0 0 1 13" "The High Memory Guard & Diagnostic Tool"
 
@@ -461,32 +464,43 @@ print(f'{tot/1048576:.1f}G {used/1048576:.1f}G {avail/1048576:.1f}G {free/104857
     CARD_BODY=$(printf "%b" "\033[1;36m         Memory Attribution Breakdown\033[0m\n\
 \033[38;5;244m────────────────────────────────────────────────\033[0m\n\
  \033[1mSystem Memory (procps / free):\033[0m\n\
-   Total: $mem_tot_g   • Used: $mem_used_g ($used_pct)\n\
-   Available: $mem_avail_g   • Free: $mem_free_g\n\n\
+   Total: $mem_tot_g   • Used: $mem_used_g ($used_pct)\n\n\
  \033[1mResource Attribution:\033[0m\n\
    • Private Process RAM (Anon):  $anon_g ($anon_pct)\n\
    • Shared / Wayland / tmpfs:    $shmem_g  ($shmem_pct)\n\
    • Kernel Slab & PageTables:    $kern_g  ($kern_pct)\n\
    • Kernel Eviction Reserves:    $reserv_g ($reserv_pct)\n\
 \033[38;5;244m────────────────────────────────────────────────\033[0m\n\
- \033[2mPress enter or esc to return • 'a' toggles view\033[0m")
+ \033[2menter, esc, or ↑ to return • 'a' toggle view\033[0m")
 
     local CARD_BOX
     CARD_BOX=$(gum style --border rounded --border-foreground 212 --width 54 --padding "0 1" --margin "0 4" "$CARD_BODY")
-    echo "$CARD_BOX"
+    printf "%s\n" "$CARD_BOX"
     
-    local _k=""
-    read -rsn1 _k || true
-    if [[ "$_k" == "a" || "$_k" == "A" ]]; then
+    local key=""
+    IFS= read -rsn1 key || true
+    if [[ "$key" == $'\e' ]]; then
+        local rest=""
+        IFS= read -rsn2 -t 0.15 rest || true
+        if [[ "$rest" == "[A" || "$rest" == "OA" ]]; then
+            MAIN_SEL=$(( ${#PROC_LIST[@]} > 1 ? ${#PROC_LIST[@]} - 2 : 0 ))
+        fi
+    elif [[ "$key" == "k" ]]; then
+        MAIN_SEL=$(( ${#PROC_LIST[@]} > 1 ? ${#PROC_LIST[@]} - 2 : 0 ))
+    elif [[ "$key" == "a" || "$key" == "A" ]]; then
         if [ "$VIEW_MODE" = "tree" ]; then
             VIEW_MODE="app"
         else
             VIEW_MODE="tree"
         fi
+        MAIN_SEL=0
     fi
+
+    while IFS= read -rsn1 -t 0.02 _discard 2>/dev/null; do :; done
 }
 
 VIEW_MODE="tree"
+MAIN_SEL=0
 
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
     watch_floating_state &
@@ -710,7 +724,7 @@ while true; do
                 REST_LABEL="Other (${REST_PROCS}p)"
             fi
         fi
-        OTHER_DISPLAY=$(printf "%8s %7d MB   \033[38;5;244m→\033[0m   %6.1f%%    %-18s 📊" "..." "$REST_MB" "$REST_PCT" "$REST_LABEL")
+        OTHER_DISPLAY=$(printf "%8s %7d MB       %6.1f%%    %-18s 📊" "..." "$REST_MB" "$REST_PCT" "$REST_LABEL")
         PROC_LIST+=("$OTHER_DISPLAY")
         GROUP_MEMBERS_MAP["..."]="other"
     fi
@@ -730,7 +744,7 @@ while true; do
     fi
 
     TARGET=""
-    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 0 1; then
+    if ! omaram_choose PROC_LIST "$HEADER_TEXT" "$NAV_HELP" TARGET "208" 0 "${MAIN_SEL:-0}" 1; then
         CHOOSE_RET=$?
         if [ "$CHOOSE_RET" -eq 10 ]; then
             if [ "$VIEW_MODE" = "tree" ]; then
@@ -738,6 +752,7 @@ while true; do
             else
                 VIEW_MODE="tree"
             fi
+            MAIN_SEL=0
             continue
         fi
         exit 130
@@ -757,6 +772,7 @@ while true; do
     
     # If the user selected the "Other" summary row, display the full memory attribution breakdown
     if [[ "$PID" == "..." || "$TARGET" =~ "Other" ]]; then
+        MAIN_SEL=$(( ${#PROC_LIST[@]} - 1 ))
         show_memory_attribution_breakdown "$TOTAL_MEM_KB"
         continue
     fi

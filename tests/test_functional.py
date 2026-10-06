@@ -497,6 +497,26 @@ class TUIEngineFunctionalTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(out, "App1")
 
+    def test_show_memory_attribution_breakdown_clean_card_and_up_arrow(self):
+        bash_cmd = f"""
+        source <(sed -n '/^show_memory_attribution_breakdown()/,/^}}/p' "{self.guard_script}")
+        VIEW_MODE="tree"
+        MAIN_SEL=5
+        PROC_LIST=("p1" "p2" "p3" "p4" "p5" "... Other")
+        show_memory_attribution_breakdown < <(printf "\\x1b[A")
+        printf '%s|%s' "$MAIN_SEL" "$VIEW_MODE"
+        """
+        res = subprocess.run(["bash", "-c", bash_cmd], capture_output=True, text=True, check=True)
+        # Should not contain "Available:" in output
+        self.assertNotIn("Available:", res.stdout)
+        # Should hide cursor
+        self.assertIn("\033[?25l", res.stdout)
+        # Should contain attribution breakdown
+        self.assertIn("Memory Attribution Breakdown", res.stdout)
+        self.assertIn("Private Process RAM", res.stdout)
+        # Output ends with MAIN_SEL|VIEW_MODE: MAIN_SEL should be updated to 4
+        self.assertTrue(res.stdout.strip().endswith("4|tree"))
+
 
 class LauncherSecurityTests(unittest.TestCase):
     def setUp(self):
