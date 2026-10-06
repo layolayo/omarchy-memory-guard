@@ -460,6 +460,9 @@ print(f'{tot/1048576:.1f}G {used/1048576:.1f}G {avail/1048576:.1f}G {free/104857
       f'{(anon/tot)*100:.1f}% {(shmem/tot)*100:.1f}% {(kern/tot)*100:.1f}% {(reserv/tot)*100:.1f}%')
 " 2>/dev/null || echo "30.0G 12.0G 18.0G 2.0G 40.0% 6.5G 1.6G 0.5G 3.4G 21.0% 5.3% 1.7% 12.0%")
 
+    local toggle_label="tree view"
+    [ "$VIEW_MODE" = "tree" ] && toggle_label="app view"
+
     local CARD_BODY
     CARD_BODY=$(printf "%b" "\033[1;36m         Memory Attribution Breakdown\033[0m\n\
 \033[38;5;244m────────────────────────────────────────────────\033[0m\n\
@@ -471,7 +474,7 @@ print(f'{tot/1048576:.1f}G {used/1048576:.1f}G {avail/1048576:.1f}G {free/104857
    • Kernel Slab & PageTables:    $kern_g  ($kern_pct)\n\
    • Kernel Eviction Reserves:    $reserv_g ($reserv_pct)\n\
 \033[38;5;244m────────────────────────────────────────────────\033[0m\n\
- \033[2menter, esc, or ↑ to return • 'a' toggle view\033[0m")
+ \033[2menter, esc, or ↑ to return • 'a' $toggle_label\033[0m")
 
     local CARD_BOX
     CARD_BOX=$(gum style --border rounded --border-foreground 212 --width 54 --padding "0 1" --margin "0 4" "$CARD_BODY")
@@ -742,10 +745,10 @@ while true; do
 
     COLUMNS=$(printf "   %8s %10s %5s %7s    %-18s %s" "PID" "RAM" "TREND" "MEM %" "APP" "STATE")
     if [ "$VIEW_MODE" = "app" ]; then
-        HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Applications:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+        HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Applications \033[38;5;51m(App View)\033[1;33m:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
         NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • 'a' tree view • super+t %s • esc quit\033[0m"
     else
-        HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Process Trees:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
+        HEADER_TEXT=$(printf "\n   \033[1;33mTop 5 Process Trees \033[38;5;51m(Tree View)\033[1;33m:\033[0m\n\033[1;36m%s\033[0m" "$COLUMNS")
         NAV_HELP="\033[2;38;5;244m↑↓ nav • enter select • 'a' app view • super+t %s • esc quit\033[0m"
     fi
 
