@@ -523,7 +523,7 @@ while true; do
     TOTAL_MEM_KB=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
 
     # Memory Stats Box with Linux PSI (Pressure Stall Information)
-    PSI_VAL=$(awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}' /proc/pressure/memory 2>/dev/null || echo "N/A")
+    PSI_VAL=$(awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); v = $i + 0; if (v < 0.05) print "0%"; else printf "%.1f%%\n", v}}' /proc/pressure/memory 2>/dev/null || echo "N/A")
     MEM_STATS=$(free -h | head -n 2 | awk -v psi="${PSI_VAL:-N/A}" '
         NR==1 {print "Total\tUsed\tFree\tShared\tCache\tAvail\tPSI"}
         NR==2 {print $2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"psi}

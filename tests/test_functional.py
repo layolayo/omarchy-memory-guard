@@ -591,15 +591,27 @@ Shared_Dirty:       4856 kB
 
 class LinuxPSIMetricTests(unittest.TestCase):
     def test_psi_extraction(self):
-        psi_content = """\
+        guard_content = (SCRIPTS_DIR / "omaram-guard.sh").read_text()
+        awk_line = [l for l in guard_content.splitlines() if "PSI_VAL=" in l][0]
+        start = awk_line.find("awk '") + 4
+        end = awk_line.rfind("'", 0, awk_line.find("/proc/pressure/memory")) + 1
+        awk_script = awk_line[start:end].strip("'")
+
+        # Zero PSI: should display "0%" without decimals
+        psi_zero = """\
+some avg10=0.00 avg60=0.00 avg300=0.00 total=128492
+full avg10=0.00 avg60=0.00 avg300=0.00 total=48102
+"""
+        res_zero = subprocess.run(["awk", awk_script], input=psi_zero, capture_output=True, text=True, check=True)
+        self.assertEqual(res_zero.stdout.strip(), "0%")
+
+        # Non-zero PSI: should display 1 decimal place (e.g. 4.2%)
+        psi_nonzero = """\
 some avg10=4.25 avg60=1.10 avg300=0.50 total=128492
 full avg10=2.10 avg60=0.40 avg300=0.10 total=48102
 """
-        awk_cmd = """
-        awk '/^some/ {for (i=1; i<=NF; i++) if ($i ~ /^avg10=/) {sub("avg10=", "", $i); print $i"%"}}'
-        """
-        res = subprocess.run(["bash", "-c", awk_cmd], input=psi_content, capture_output=True, text=True, check=True)
-        self.assertEqual(res.stdout.strip(), "4.25%")
+        res_nonzero = subprocess.run(["awk", awk_script], input=psi_nonzero, capture_output=True, text=True, check=True)
+        self.assertEqual(res_nonzero.stdout.strip(), "4.2%")
 
 class AppNapEngineFunctionalTests(unittest.TestCase):
     def setUp(self):
