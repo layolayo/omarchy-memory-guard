@@ -25,8 +25,8 @@ BarWidget {
   }
 
   function manageMem() {
-    if (root.bar && root.launcherPath) {
-      root.bar.run(root.launcherPath)
+    if (root.launcherPath) {
+      Quickshell.execDetached([root.launcherPath])
     }
   }
 
@@ -40,18 +40,30 @@ BarWidget {
       if (root.lastAlertLevel < 2 || (now - root.lastAlertTime > 180000)) {
         root.lastAlertLevel = 2
         root.lastAlertTime = now
-        if (root.bar) {
-          root.bar.run("omarchy-notification-send --app-name 'OMARAM Guard' -g '󰍛' -u critical 'Critical Memory: " + pct + "% Used' 'System memory is critically low! Click to open OMARAM Guard.' --exec '" + launcher.replace(/'/g, "'\\''") + "'")
-        }
+        Quickshell.execDetached([
+          "omarchy-notification-send",
+          "--app-name", "OMARAM Guard",
+          "-g", "󰍛",
+          "-u", "critical",
+          "Critical Memory: " + pct + "% Used",
+          "System memory is critically low! Click to open OMARAM Guard.",
+          "--exec", launcher
+        ])
       }
     } else if (pct >= 80) {
       // Warning Alert: trigger if escalating to level 1, or if 5 minutes have passed since last alert
       if (root.lastAlertLevel < 1 || (now - root.lastAlertTime > 300000)) {
         root.lastAlertLevel = 1
         root.lastAlertTime = now
-        if (root.bar) {
-          root.bar.run("omarchy-notification-send --app-name 'OMARAM Guard' -g '󰍛' -u normal 'High Memory Warning: " + pct + "% Used' 'Click to open OMARAM Guard and manage processes.' --exec '" + launcher.replace(/'/g, "'\\''") + "'")
-        }
+        Quickshell.execDetached([
+          "omarchy-notification-send",
+          "--app-name", "OMARAM Guard",
+          "-g", "󰍛",
+          "-u", "normal",
+          "High Memory Warning: " + pct + "% Used",
+          "Click to open OMARAM Guard and manage processes.",
+          "--exec", launcher
+        ])
       }
     } else if (pct < 75) {
       // Reset alert level when memory returns to safe thresholds

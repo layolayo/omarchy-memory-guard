@@ -483,8 +483,9 @@ class QMLIntegrityTests(unittest.TestCase):
         self.assertIn("exitCode >= 0 && exitCode <= 100", self.content)
 
     def test_command_injection_safeguards(self):
-        # The exec argument in notification should be safely quoted
-        self.assertIn("launcher.replace(/'/g, \"'\\\\''\")", self.content)
+        # Launches and notifications must execute via argv arrays, never shell strings
+        self.assertIn("Quickshell.execDetached([", self.content)
+        self.assertNotIn("bar.run(", self.content)
 
 
 class AppNapWatcherSecurityTests(unittest.TestCase):
